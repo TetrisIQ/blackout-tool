@@ -117,3 +117,61 @@ Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay
 5. **Extra flags:** `--chunk-size` (advanced; a resumed download keeps the size it started with) and `--retries`. With the defaults (10 attempts, 1 s base, 60 s cap) a chunk survives an outage of roughly 3 to 5 minutes inside one run; after that `kit` exits non-zero and the next run continues from the saved state.
 6. **Layout:** files go to `<data-dir>/downloads/<package-id>/<file-name>` with `<name>.part`, `<name>.part.state` and a `<name>.lock` (left in place after finishing; flock needs a stable inode).
 7. Metalink/torrent support stays deferred; mirrors from the `.meta4` file are used.
+
+---
+
+# Phase 3 - Package installers, ZIM first (PROPOSED, awaiting confirmation)
+
+Goal (roadmap): `kit install wikipedia_de_nopic` yields a working local Wikipedia at `http://localhost:8080`.
+
+## P3-1. Installer interface
+```rust
+trait Installer {
+    fn plan(&self, pkg, ctx) -> Result<Vec<Step>>;     // dry run: what would change, no side effects
+    fn install(&self, pkg, ctx) -> Result<()>;         // idempotent
+    fn verify(&self, pkg, ctx) -> Result<Vec<Check>>;  // read-only health checks
+    fn uninstall(&self, pkg, ctx) -> Result<()>;       // idempotent, reversible
+}
+```
+Installers are looked up by package `type`. Phase 3 implements `zim`; other types fail with "not supported yet" instead of half-working. Everything that touches the host goes through two small traits so tests never do: `CommandRunner` (runs `kiwix-manage`, `systemctl --user`, ...) and the filesystem paths in `Ctx` (all under the data dir, config dir and unit dir, all overridable).
+
+## P3-2. Installed state is the source of truth
+`<data-dir>/state/installed.json` (atomic write, flock): per package id, the version, files, and install time. Everything else (Kiwix library XML, portal page, service) is **reconciled from this state** on every install/uninstall, which makes each step idempotent by construction: running it twice converges to the same result, and a half-finished run is repaired by the next one.
+
+## P3-3. Placing the ZIM: hard link, no copy
+The verified file stays in `downloads/<id>/<name>.zim` (so `kit download` stays a no-op). `kit install` hard-links it to `<data-dir>/library/<name>.zim`. Same filesystem, no extra space, instant, even for 127 GB. `uninstall` removes the link; `uninstall --purge` also deletes the download. If hard-linking fails (data dir on a filesystem without hard links, e.g. exFAT on an external drive) it falls back to **moving** the file and leaving no duplicate, recorded in the state so `download` knows it is installed.
+
+## P3-4. Kiwix library XML via `kiwix-manage`
+`<data-dir>/library/library.xml` is rebuilt from the state with `kiwix-manage` (reads ZIM metadata from the file itself, so no OPDS needed offline). Rebuilding from scratch avoids stale or duplicate entries. A missing `kiwix-manage`/`kiwix-serve` is a clear error with the install command for the detected distro (`sudo apt install kiwix-tools`, `sudo pacman -S kiwix-tools`).
+
+## P3-5. kiwix-tools is a system package; kit does not install it
+Roadmap rule 2: root only for specific, explained steps. Installing packages is such a step but belongs to the distro, and a release `.deb` can simply depend on `kiwix-tools`. Alternative (not now): `kit` downloads the official static kiwix-tools build into `<data-dir>/bin`, unprivileged and distro-independent. I recommend doing that later for the live image and AppImage, not in Phase 3.
+
+## P3-6. Service: systemd user unit `kit-kiwix.service`
+- File: `~/.config/systemd/user/kit-kiwix.service`, first line `# Managed by kit (emergency-kit). Remove with: kit uninstall`.
+- `ExecStart=<kiwix-serve> --library --monitorLibrary --address 127.0.0.1 --port 8080 <data-dir>/library/library.xml`; `Restart=on-failure`; no root.
+- `--monitorLibrary` makes `kiwix-serve` pick up library changes without a restart (to verify against Debian's older kiwix-tools; if unsupported there, kit restarts the service instead).
+- Bound to `127.0.0.1` for now. Phase 4 puts Caddy in front, Phase 9 opens it to the hotspot, deliberately, not by accident.
+- Port 8080 by default, `--port` to change; an occupied port is a clear error, never a silent switch.
+- Uninstalling the last ZIM stops, disables and removes the unit and runs `daemon-reload`, so nothing of ours is left behind.
+- Starting at boot without a login session needs `loginctl enable-linger` (root); `kit` prints this as a hint, it is not done silently. It matters for the live image and the hotspot (later phases).
+
+## P3-7. Landing page stub
+`<data-dir>/portal/index.html` (static, generated from the state: title, size, version, license and a link per installed ZIM to `http://localhost:8080/viewer#<book>`) plus `installed.json` for the later portal. `kiwix-serve` already shows its own library page at `:8080`; the real portal on a friendly domain is Phase 5.
+
+## P3-8. CLI
+- `kit install --profile <id> | --select a,b [--data-dir] [--port] [--no-download]` downloads (Phase 2 engine, with its disk check) and installs. `--dry-run` prints the plan.
+- `kit uninstall <id>... [--purge]`
+- `kit verify [<id>...]`: file present with the right size, library entry, unit active, HTTP 200 from the server; `--deep` re-hashes the files. Exit code 1 on any failed check.
+- `kit status`: installed packages, sizes, service state, URL.
+
+## P3-9. Testing
+- Unit tests with a fake `CommandRunner` and temp dirs: state transitions, idempotent reinstall, uninstall, crash-in-the-middle recovery (state written but service not started, etc.), unit-file golden test, portal HTML, hard-link fallback, missing tools error, port-in-use error.
+- Opt-in end-to-end test (`cargo test -- --ignored`, needs `kiwix-tools`): installs a small real ZIM into a temp data dir and runs `kiwix-serve` as a plain child process on a random port (no systemd, no host change), checking `/catalog/v2/entries` and an article.
+- **Manual acceptance on this machine** (the roadmap criterion): you install `kiwix-tools`, then `kit install --select archwiki_en` (38 MB) and later `wikipedia_de_nopic` (18.6 GB); this creates the one user unit above, removable with `kit uninstall`. Automated tests never touch your systemd or `~/.config`.
+
+## P3 open questions
+1. kiwix-tools as a system package (you run `sudo pacman -S kiwix-tools` for the acceptance test), per P3-5: OK?
+2. Hard link into `library/` with move fallback (P3-3): OK?
+3. May I create the `kit-kiwix.service` user unit on this machine for the manual acceptance test (P3-6)? Removal is `kit uninstall`.
+4. Bind to 127.0.0.1:8080 for now (P3-6): OK?
