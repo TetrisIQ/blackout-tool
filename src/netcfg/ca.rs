@@ -16,7 +16,7 @@ use time::{Duration, OffsetDateTime};
 use super::{NetError, io_err};
 use crate::catalog::manifest::is_valid_host;
 
-const CA_COMMON_NAME: &str = "kit local CA (this machine only)";
+pub const CA_COMMON_NAME: &str = "kit local CA (this machine only)";
 const CA_YEARS: i64 = 5;
 const LEAF_DAYS: i64 = 365;
 /// A leaf with less validity than this is re-issued.
