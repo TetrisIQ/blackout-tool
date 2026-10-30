@@ -182,4 +182,4 @@ Found while implementing:
 6. **`--purge`** also removes the download engine's `.lock`, `.part` and `.part.state` leftovers and the empty `downloads/<id>/` directory.
 7. **A moved (not linked) file is the only copy:** uninstall without `--purge` warns that the data was deleted and `kit download` fetches it again.
 8. `--port` accepts 1024 and up. An occupied port is an error before the service is touched. If the service is already running, the check is skipped.
-9. **Tests:** the host (commands, unit dir, tool search path, HTTP probe, port check) is injected, so 130 of the install tests run against fakes and temp dirs. `tests/e2e_kiwix.rs` (opt-in, `--ignored`) runs the real `kiwix-manage` and `kiwix-serve` with a shim `systemctl`, still without touching systemd.
+9. **Tests:** the host (commands, unit dir, tool search path, HTTP probe, port check) is injected, so all 50 new install and CLI tests run against fakes and temp dirs. `tests/e2e_kiwix.rs` (opt-in, `--ignored`) runs the real `kiwix-manage` and `kiwix-serve` with a shim `systemctl`, still without touching systemd.
