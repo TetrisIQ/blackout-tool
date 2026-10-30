@@ -13,7 +13,7 @@ pub mod state;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub use engine::{backoff_delay, download};
+pub use engine::{backoff_delay, download, hash_file};
 pub use http::UreqRange;
 pub use ratelimit::RateLimiter;
 use state::State;

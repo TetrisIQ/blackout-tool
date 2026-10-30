@@ -175,7 +175,7 @@ fn prepare(target: &Target, opts: &Options) -> Result<(State, File), DownloadErr
     Ok((state, file))
 }
 
-pub(crate) fn hash_file(path: &Path) -> Result<String, DownloadError> {
+pub fn hash_file(path: &Path) -> Result<String, DownloadError> {
     let mut file = File::open(path).map_err(io_err("cannot open", path))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 1 << 20];
