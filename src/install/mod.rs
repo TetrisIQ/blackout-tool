@@ -1,0 +1,170 @@
+//! Phase 3: package installers. `zim` packages are linked into a library, listed in a Kiwix
+//! library XML and served by a systemd user service. All state lives in
+//! `<data-dir>/state/installed.json`; everything else is reconciled from it.
+
+pub mod portal;
+pub mod reconcile;
+pub mod runner;
+pub mod service;
+pub mod state;
+pub mod tools;
+pub mod zim;
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use crate::catalog::PackageType;
+use crate::catalog::http::Http;
+use runner::CommandRunner;
+use state::{Record, State, StateGuard};
+
+/// Default port of the content server (the roadmap's 8080 collides with too many dev servers).
+pub const DEFAULT_PORT: u16 = 6589;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InstallError {
+    #[error("`{tool}` not found. {hint}")]
+    MissingTool { tool: String, hint: String },
+    #[error("{context}: {source}")]
+    Io { context: String, source: std::io::Error },
+    #[error("`{command}` failed: {stderr}")]
+    Command { command: String, stderr: String },
+    #[error("{0}")]
+    State(String),
+    #[error("another kit process is changing the installation ({})", .0.display())]
+    Busy(PathBuf),
+    #[error("port {0} on 127.0.0.1 is already in use; choose another with --port")]
+    PortInUse(u16),
+    #[error("the content server did not start; see: journalctl --user -u kit-kiwix.service")]
+    ServiceFailed,
+    #[error("{} exists but was not written by kit; refusing to overwrite it", .0.display())]
+    ForeignUnit(PathBuf),
+    #[error("{0}")]
+    Unsupported(String),
+    #[error("{0}")]
+    Corrupt(String),
+    #[error("paths must be valid UTF-8: {0}")]
+    BadPath(String),
+}
+
+pub(crate) fn io_err(context: &str, path: &Path) -> impl FnOnce(std::io::Error) -> InstallError {
+    let context = format!("{context} {}", path.display());
+    move |source| InstallError::Io { context, source }
+}
+
+/// Every location kit writes to. All derived from two roots, so tests can use temp dirs.
+#[derive(Debug, Clone)]
+pub struct Paths {
+    pub data_dir: PathBuf,
+    /// Directory for systemd user units (`~/.config/systemd/user`).
+    pub unit_dir: PathBuf,
+}
+
+impl Paths {
+    pub fn new(data_dir: PathBuf, unit_dir: PathBuf) -> Result<Self, InstallError> {
+        for p in [&data_dir, &unit_dir] {
+            if p.to_str().is_none() {
+                return Err(InstallError::BadPath(p.display().to_string()));
+            }
+        }
+        Ok(Self { data_dir, unit_dir })
+    }
+
+    pub fn downloads_dir(&self) -> PathBuf {
+        self.data_dir.join("downloads")
+    }
+    pub fn library_dir(&self) -> PathBuf {
+        self.data_dir.join("library")
+    }
+    pub fn library_xml(&self) -> PathBuf {
+        self.library_dir().join("library.xml")
+    }
+    pub fn state_dir(&self) -> PathBuf {
+        self.data_dir.join("state")
+    }
+    pub fn state_file(&self) -> PathBuf {
+        self.state_dir().join("installed.json")
+    }
+    pub fn lock_file(&self) -> PathBuf {
+        self.state_dir().join("installed.lock")
+    }
+    pub fn portal_dir(&self) -> PathBuf {
+        self.data_dir.join("portal")
+    }
+    pub fn unit_file(&self) -> PathBuf {
+        self.unit_dir.join(service::UNIT_NAME)
+    }
+}
+
+/// Everything an installer needs from the outside world.
+pub struct Ctx<'a> {
+    pub paths: Paths,
+    pub runner: &'a dyn CommandRunner,
+    /// Used by `verify` to ask the running server what it serves.
+    pub probe: &'a dyn Http,
+    /// Directories searched for `kiwix-serve`, `systemctl`, ...
+    pub search_path: Vec<PathBuf>,
+    pub port: u16,
+    pub user: Option<String>,
+    /// How long to wait for the service to become active after (re)starting it.
+    pub start_wait: Duration,
+    /// Seconds since the Unix epoch, injectable for tests.
+    pub now: u64,
+    /// Check that the port is free before starting the service (off in tests that would collide).
+    pub check_port: bool,
+}
+
+/// A downloaded package, ready to be installed.
+#[derive(Debug, Clone)]
+pub struct InstallInput {
+    pub id: String,
+    pub name: String,
+    pub license: String,
+    pub version: Option<String>,
+    /// The verified download (`downloads/<id>/<file>`).
+    pub source: PathBuf,
+    pub file_name: String,
+    pub size: u64,
+    pub sha256: String,
+    /// The download engine verified the checksum in this run, so the installer need not hash again.
+    pub verified: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Check {
+    pub name: String,
+    pub ok: bool,
+    pub detail: String,
+}
+
+pub trait Installer {
+    /// Dry run: what `install` would do. No side effects.
+    fn plan(&self, input: &InstallInput, ctx: &Ctx, state: &State) -> Result<Vec<String>, InstallError>;
+    /// Idempotent. Returns hints for the user.
+    fn install(
+        &self,
+        input: &InstallInput,
+        ctx: &Ctx,
+        state: &mut StateGuard,
+    ) -> Result<Vec<String>, InstallError>;
+    /// Read-only health checks of one installed package.
+    fn verify(&self, record: &Record, ctx: &Ctx, deep: bool) -> Vec<Check>;
+    /// Idempotent; an unknown id is not an error.
+    fn uninstall(
+        &self,
+        id: &str,
+        ctx: &Ctx,
+        state: &mut StateGuard,
+        purge: bool,
+    ) -> Result<Vec<String>, InstallError>;
+}
+
+pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallError> {
+    match kind {
+        PackageType::Zim => Ok(Box::new(zim::ZimInstaller)),
+        other => Err(InstallError::Unsupported(format!(
+            "packages of type {} cannot be installed yet",
+            other.as_str()
+        ))),
+    }
+}
