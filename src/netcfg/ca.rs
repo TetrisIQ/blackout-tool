@@ -209,6 +209,19 @@ impl Ca {
         if self.leaf_current(&hosts, now) {
             return Ok(false);
         }
+        let (cert_pem, key_pem, expires) = self.sign_leaf(&hosts, now)?;
+        write_private(&self.files.leaf_key(), &key_pem)?;
+        write_public(&self.files.leaf_cert(), &cert_pem)?;
+        write_public(&self.files.leaf_hosts(), &(hosts.join("\n") + "\n"))?;
+        write_public(&self.files.leaf_expiry(), &format!("{expires}\n"))?;
+        Ok(true)
+    }
+
+    /// Signs a server certificate for `hosts` without checking the name constraint. Only
+    /// `ensure_leaf` should be used to issue; this exists so tests can prove that a verifier
+    /// rejects what the CA must never be able to vouch for.
+    #[doc(hidden)]
+    pub fn sign_leaf(&self, hosts: &[String], now: u64) -> Result<(String, String, i64), NetError> {
         let issuer = Issuer::new(ca_params(&self.permitted(), now)?, &self.key);
         let key = KeyPair::generate().map_err(cert_err)?;
         let mut p = CertificateParams::default();
@@ -227,11 +240,7 @@ impl Ca {
         p.not_after = start + Duration::days(LEAF_DAYS);
         let expires = p.not_after.unix_timestamp();
         let cert = p.signed_by(&key, &issuer).map_err(cert_err)?;
-        write_private(&self.files.leaf_key(), &key.serialize_pem())?;
-        write_public(&self.files.leaf_cert(), &cert.pem())?;
-        write_public(&self.files.leaf_hosts(), &(hosts.join("\n") + "\n"))?;
-        write_public(&self.files.leaf_expiry(), &format!("{expires}\n"))?;
-        Ok(true)
+        Ok((cert.pem(), key.serialize_pem(), expires))
     }
 
     /// Deletes the CA directory including the key.
@@ -246,7 +255,6 @@ impl Ca {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     const NOW: u64 = 1_788_000_000; // 2026-08
     fn hosts(h: &[&str]) -> Vec<String> {
@@ -305,53 +313,5 @@ mod tests {
         ca.ensure_leaf(&hosts(&["a.example.org"]), NOW).unwrap();
         let ca = Ca::create(d.path(), &hosts(&["a.example.org"]), NOW).unwrap();
         assert!(!ca.files.leaf_cert().exists());
-    }
-
-    /// Checks the constraint with a real verifier. Skipped when `openssl` is missing.
-    #[test]
-    fn name_constraints_are_enforced_by_openssl() {
-        if Command::new("openssl").arg("version").output().is_err() {
-            eprintln!("openssl not found, skipping");
-            return;
-        }
-        let d = tempfile::tempdir().unwrap();
-        let ca = Ca::create(d.path(), &hosts(&["de.wikipedia.org"]), NOW).unwrap();
-        ca.ensure_leaf(&hosts(&["de.wikipedia.org"]), NOW).unwrap();
-        let at = NOW.to_string();
-        let verify = |leaf: &Path| {
-            let o = Command::new("openssl")
-                .args(["verify", "-attime", &at, "-CAfile"])
-                .arg(ca.files.cert())
-                .arg(leaf)
-                .output()
-                .unwrap();
-            (
-                o.status.success(),
-                String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr),
-            )
-        };
-        let (ok, out) = verify(&ca.files.leaf_cert());
-        assert!(ok, "allowed host must verify: {out}");
-
-        // A leaf for a forbidden name, signed with the very same CA key, must be rejected.
-        let issuer = Issuer::new(ca_params(&ca.permitted(), NOW).unwrap(), &ca.key);
-        let key = KeyPair::generate().unwrap();
-        let mut p = CertificateParams::new(vec!["example.com".to_string()]).unwrap();
-        let start = at_secs(NOW) - Duration::days(1);
-        p.not_before = start;
-        p.not_after = start + Duration::days(30);
-        let forged = p.signed_by(&key, &issuer).unwrap();
-        let path = d.path().join("forged.pem");
-        fs::write(&path, forged.pem()).unwrap();
-        let (ok, out) = verify(&path);
-        assert!(!ok, "forbidden host must not verify: {out}");
-        assert!(
-            out.to_lowercase().contains("permitted") || out.contains("47"),
-            "{out}"
-        );
-    }
-
-    fn at_secs(s: u64) -> OffsetDateTime {
-        at(s).unwrap()
     }
 }

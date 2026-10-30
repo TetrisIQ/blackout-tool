@@ -46,3 +46,18 @@ impl NetPaths {
         self.dir.join("ca")
     }
 }
+
+/// Runs every command through `sudo`, so only the steps that need root ask for it.
+pub struct SudoRunner;
+
+impl crate::install::runner::CommandRunner for SudoRunner {
+    fn run(&self, program: &str, args: &[&str]) -> std::io::Result<crate::install::runner::CmdOutput> {
+        let mut full = vec!["--", program];
+        full.extend_from_slice(args);
+        crate::install::runner::RealRunner.run("sudo", &full)
+    }
+}
+
+pub fn running_as_root() -> bool {
+    rustix::process::geteuid().is_root()
+}

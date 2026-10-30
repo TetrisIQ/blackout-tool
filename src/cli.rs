@@ -1,4 +1,4 @@
-//! Command line interface: `kit list | show | profiles | plan | download | install | uninstall | verify | status`.
+//! Command line interface: `kit list | show | profiles | plan | download | install | uninstall | verify | status | net`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -83,6 +83,8 @@ pub enum Command {
     Verify(VerifyArgs),
     /// Show what is installed and whether the server runs
     Status(StatusArgs),
+    /// Local HTTPS for the real domains (CA, Caddy, hosts); every step is reversible
+    Net(crate::cli_net::NetArgs),
 }
 
 #[derive(Debug, Args)]
@@ -240,6 +242,11 @@ pub struct Env<'a> {
     pub start_wait: Duration,
     /// Verify that the port is free before starting the service.
     pub check_port: bool,
+    /// Runs commands as root (through `sudo`); only used by `kit net`.
+    pub root: &'a dyn CommandRunner,
+    pub needs_sudo: bool,
+    pub home: PathBuf,
+    pub hosts_path: PathBuf,
 }
 
 /// What a successful command wants the process exit code to be.
@@ -288,6 +295,10 @@ pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<Outcome> {
             user: std::env::var("USER").ok().filter(|u| !u.is_empty()),
             start_wait: Duration::from_secs(3),
             check_port: true,
+            root: &crate::netcfg::SudoRunner,
+            needs_sudo: !crate::netcfg::running_as_root(),
+            home: PathBuf::from(std::env::var_os("HOME").unwrap_or_default()),
+            hosts_path: PathBuf::from("/etc/hosts"),
         },
     )
 }
@@ -306,6 +317,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::Uninstall(args) => return uninstall_cmd(args, env, out),
         Command::Verify(args) => return verify_cmd(args, env, out),
         Command::Status(args) => return status_cmd(args, env, out),
+        Command::Net(args) => return crate::cli_net::net_cmd(args, &catalog, env, out),
     }
     Ok(Outcome::Ok)
 }
@@ -331,14 +343,14 @@ fn unit_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config/systemd/user"))
 }
 
-fn data_dir_of(explicit: &Option<PathBuf>) -> Result<PathBuf> {
+pub(crate) fn data_dir_of(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     match explicit {
         Some(d) => Ok(d.clone()),
         None => xdg_dir("XDG_DATA_HOME", ""),
     }
 }
 
-fn unix_now() -> u64 {
+pub(crate) fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -1190,6 +1202,10 @@ mod tests {
                 user: Some("tester".into()),
                 start_wait: Duration::ZERO,
                 check_port: false,
+                root: &host.runner,
+                needs_sudo: false,
+                home: host.units.clone(),
+                hosts_path: host.units.join("hosts"),
             },
         );
         (r, String::from_utf8(out).unwrap())
@@ -1440,7 +1456,7 @@ mod tests {
             &format!(
                 "id: wiki\nname: Test Wiki\ndescription: d\ncategory: c\ntype: zim\n\
                  source: {{url: 'http://127.0.0.1:1/wiki_2026-10.zim'}}\nsha256: {sha}\nsize_bytes: {}\n\
-                 license: {{spdx: CC-BY-SA-4.0}}\n",
+                 license: {{spdx: CC-BY-SA-4.0}}\nmirror_domains: [wiki.example.org]\n",
                 ZIM_BYTES.len()
             ),
         );
@@ -1694,6 +1710,73 @@ mod tests {
         assert_eq!(r.unwrap(), Outcome::ChecksFailed);
         assert_eq!(Outcome::ChecksFailed.exit_code(), 1);
         assert!(out.contains("FAIL") && out.contains("server answers"), "{out}");
+    }
+
+    #[test]
+    fn net_needs_an_installed_mirror_and_the_tools_and_status_says_off() {
+        let cat = install_catalog();
+        let data = tempfile::tempdir().unwrap();
+        let dd = data.path().to_str().unwrap();
+        let (mut host, _) = bytes_host();
+        host.probe = FakeHttp::default().with(
+            "http://127.0.0.1:6589/catalog/v2/entries?count=1",
+            "<feed><totalResults>1</totalResults></feed>",
+        );
+        let (r, _) = exec_on(
+            &host,
+            cat.path(),
+            &["net", "enable", "--dry-run", "--data-dir", dd],
+            &http(),
+            0,
+        );
+        let e = r.unwrap_err().to_string();
+        assert!(e.contains("no installed package mirrors a domain"), "{e}");
+
+        let (r, _) = exec_on(
+            &host,
+            cat.path(),
+            &["install", "--select", "wiki", "--data-dir", dd],
+            &http(),
+            u64::MAX,
+        );
+        r.unwrap();
+        // The fake host has no caddy: a clear error, nothing touched.
+        let (r, _) = exec_on(
+            &host,
+            cat.path(),
+            &["net", "enable", "--dry-run", "--data-dir", dd],
+            &http(),
+            0,
+        );
+        let e = r.unwrap_err().to_string();
+        assert!(e.contains("`caddy` not found"), "{e}");
+        assert!(!data.path().join("net").exists());
+
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["net", "status", "--data-dir", dd],
+            &http(),
+            0,
+        );
+        assert_eq!(r.unwrap(), Outcome::ChecksFailed);
+        assert!(out.contains("not enabled"), "{out}");
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["net", "disable", "--data-dir", dd],
+            &http(),
+            0,
+        );
+        assert_eq!(r.unwrap(), Outcome::Ok, "{out}");
+    }
+
+    #[test]
+    fn net_arguments_are_validated() {
+        assert!(Cli::try_parse_from(["kit", "net"]).is_err());
+        assert!(Cli::try_parse_from(["kit", "net", "enable", "--listen-port", "80"]).is_err());
+        assert!(Cli::try_parse_from(["kit", "net", "enable", "--dry-run", "--renew-ca"]).is_ok());
+        assert!(Cli::try_parse_from(["kit", "net", "disable", "--remove-ca"]).is_ok());
     }
 
     #[test]

@@ -3,6 +3,7 @@
 
 pub mod catalog;
 pub mod cli;
+pub mod cli_net;
 pub mod diskspace;
 pub mod plan;
 
