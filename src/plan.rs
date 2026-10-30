@@ -34,6 +34,13 @@ pub struct PlanItem {
     pub live: bool,
     /// Pulled in through `depends_on` rather than selected directly.
     pub dependency: bool,
+    /// Download location and checksum; absent for packages without a direct download.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,8 +48,6 @@ pub struct Plan {
     pub label: String,
     pub items: Vec<PlanItem>,
     pub total_bytes: u64,
-    /// Room for the `.part` file of the largest package while it downloads.
-    pub temp_reserve_bytes: u64,
     pub margin_bytes: u64,
     pub required_bytes: u64,
     pub free_bytes: u64,
@@ -71,6 +76,11 @@ pub enum PlanError {
     Disk { path: PathBuf, source: std::io::Error },
 }
 
+/// Safety margin for `bytes`, rounded up.
+pub fn margin_for(bytes: u64) -> u64 {
+    (u128::from(bytes) * u128::from(MARGIN_PERCENT)).div_ceil(100) as u64
+}
+
 pub fn build(
     catalog: &Catalog,
     selection: &Selection,
@@ -93,6 +103,9 @@ pub fn build(
                 license: m.license.spdx.clone(),
                 live: r.live,
                 dependency: !selection.ids.contains(&m.id),
+                url: r.url,
+                mirrors: r.mirrors,
+                sha256: r.sha256,
             }),
             Err(e) => failures.push((m.id.clone(), e.to_string())),
         }
@@ -102,10 +115,9 @@ pub fn build(
     }
 
     let total_bytes = items.iter().fold(0u64, |acc, i| acc.saturating_add(i.size_bytes));
-    let temp_reserve_bytes = items.iter().map(|i| i.size_bytes).max().unwrap_or(0);
-    let base = total_bytes.saturating_add(temp_reserve_bytes);
-    let margin_bytes = (u128::from(base) * u128::from(MARGIN_PERCENT)).div_ceil(100) as u64;
-    let required_bytes = base.saturating_add(margin_bytes);
+    // Downloads land in `<name>.part` and are renamed into place, so no extra temp space is needed.
+    let margin_bytes = margin_for(total_bytes);
+    let required_bytes = total_bytes.saturating_add(margin_bytes);
 
     let free_bytes = space.available(data_dir).map_err(|source| PlanError::Disk {
         path: data_dir.to_path_buf(),
@@ -130,7 +142,6 @@ pub fn build(
         label: selection.label.clone(),
         items,
         total_bytes,
-        temp_reserve_bytes,
         margin_bytes,
         required_bytes,
         free_bytes,
@@ -220,10 +231,6 @@ pub fn render(plan: &Plan) -> String {
     }
     let lines = [
         ("Packages".to_string(), plan.total_bytes),
-        (
-            "Temp space (largest package)".to_string(),
-            plan.temp_reserve_bytes,
-        ),
         (format!("Safety margin ({MARGIN_PERCENT}%)"), plan.margin_bytes),
         ("Required".to_string(), plan.required_bytes),
         (format!("Free on {}", plan.data_dir.display()), plan.free_bytes),
@@ -351,9 +358,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p.total_bytes, 4000);
-        assert_eq!(p.temp_reserve_bytes, 3000);
-        assert_eq!(p.margin_bytes, 350, "5% of 7000");
-        assert_eq!(p.required_bytes, 7350);
+        assert_eq!(p.margin_bytes, 200, "5% of 4000");
+        assert_eq!(p.required_bytes, 4200);
         assert!(p.sufficient());
         assert_eq!(p.shortfall_bytes(), 0);
     }
@@ -362,7 +368,7 @@ mod tests {
     fn margin_rounds_up_and_survives_huge_sizes() {
         let r = resolver(&[("a", 1)]);
         let p = run(vec![pkg("a", &[], None)], &sel(&["a"], None), &r, 100).unwrap();
-        assert_eq!(p.required_bytes, 2 + 1, "base 2, margin rounds up to 1");
+        assert_eq!(p.required_bytes, 1 + 1, "margin rounds up to 1");
 
         let r = resolver(&[("a", u64::MAX / 2), ("b", u64::MAX / 2)]);
         let p = run(
@@ -378,17 +384,17 @@ mod tests {
     #[test]
     fn refuses_when_space_is_insufficient() {
         let r = resolver(&[("a", 1000)]);
-        let p = run(vec![pkg("a", &[], None)], &sel(&["a"], None), &r, 2000).unwrap();
-        assert_eq!(p.required_bytes, 2100);
+        let p = run(vec![pkg("a", &[], None)], &sel(&["a"], None), &r, 1000).unwrap();
+        assert_eq!(p.required_bytes, 1050);
         assert!(!p.sufficient());
-        assert_eq!(p.shortfall_bytes(), 100);
+        assert_eq!(p.shortfall_bytes(), 50);
         assert!(render(&p).contains("INSUFFICIENT DISK SPACE"));
     }
 
     #[test]
     fn exact_fit_is_sufficient() {
         let r = resolver(&[("a", 1000)]);
-        let p = run(vec![pkg("a", &[], None)], &sel(&["a"], None), &r, 2100).unwrap();
+        let p = run(vec![pkg("a", &[], None)], &sel(&["a"], None), &r, 1050).unwrap();
         assert!(p.sufficient());
     }
 

@@ -104,8 +104,19 @@ fn is_sha256(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
+/// https, or plain http to the local machine (used by tests; no network exposure).
+fn is_secure_url(url: &str) -> bool {
+    url.starts_with("https://")
+        || ["http://127.0.0.1", "http://localhost", "http://[::1]"]
+            .iter()
+            .any(|p| {
+                url.strip_prefix(p)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/']))
+            })
+}
+
 fn check_https(what: &str, url: &str, errs: &mut Vec<String>) {
-    if !url.starts_with("https://") {
+    if !is_secure_url(url) {
         errs.push(format!("{what} {url:?} must use https://"));
     }
 }
@@ -348,6 +359,27 @@ license: {{spdx: CC0-1.0}}
         let y = files("").replace("https://example.org", "http://example.org");
         let errs = parse(&y).unwrap().validate();
         assert!(errs.iter().any(|e| e.contains("https://")));
+    }
+
+    #[test]
+    fn plain_http_is_only_allowed_to_the_local_machine() {
+        for ok in [
+            "http://127.0.0.1:8080/a",
+            "http://localhost/a",
+            "http://[::1]:1/x",
+            "https://example.org/a",
+        ] {
+            let y = files("").replace("https://example.org/a.tar", ok);
+            assert!(parse(&y).unwrap().validate().is_empty(), "{ok}");
+        }
+        for bad in [
+            "http://127.0.0.1.evil.org/a",
+            "http://localhost.evil.org/a",
+            "http://example.org/a",
+        ] {
+            let y = files("").replace("https://example.org/a.tar", bad);
+            assert!(!parse(&y).unwrap().validate().is_empty(), "{bad}");
+        }
     }
 
     #[test]

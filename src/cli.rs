@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn plan_refuses_when_disk_is_too_small() {
         let d = catalog_dir();
-        let (r, out) = exec(d.path(), &["plan", "--profile", "small"], &http(), 30_000_000_000);
+        let (r, out) = exec(d.path(), &["plan", "--profile", "small"], &http(), 25_000_000_000);
         assert_eq!(r.unwrap(), Outcome::InsufficientSpace);
         assert_eq!(Outcome::InsufficientSpace.exit_code(), 3);
         assert!(out.contains("INSUFFICIENT DISK SPACE"), "{out}");
