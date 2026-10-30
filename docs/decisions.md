@@ -120,7 +120,7 @@ Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay
 
 ---
 
-# Phase 3 - Package installers, ZIM first (PROPOSED, awaiting confirmation)
+# Phase 3 - Package installers, ZIM first (CONFIRMED, implemented)
 
 Goal (roadmap): `kit install wikipedia_de_nopic` yields a working local Wikipedia at `http://localhost:6589`.
 
@@ -170,8 +170,16 @@ Roadmap rule 2: root only for specific, explained steps. Installing packages is 
 - Opt-in end-to-end test (`cargo test -- --ignored`, needs `kiwix-tools`): installs a small real ZIM into a temp data dir and runs `kiwix-serve` as a plain child process on a random port (no systemd, no host change), checking `/catalog/v2/entries` and an article.
 - **Manual acceptance on this machine** (the roadmap criterion): you install `kiwix-tools`, then `kit install --select archwiki_en` (38 MB) and later `wikipedia_de_nopic` (18.6 GB); this creates the one user unit above, removable with `kit uninstall`. Automated tests never touch your systemd or `~/.config`.
 
-## P3 open questions
-1. kiwix-tools as a system package (you run `sudo pacman -S kiwix-tools` for the acceptance test), per P3-5: OK?
-2. Hard link into `library/` with move fallback (P3-3): OK?
-3. May I create the `kit-kiwix.service` user unit on this machine for the manual acceptance test (P3-6)? Removal is `kit uninstall`.
-4. ~~Bind to 127.0.0.1:8080~~ **Decided:** 127.0.0.1:6589 (supersedes the roadmap's `localhost:8080` acceptance URL).
+## P3 decisions and deviations
+Confirmed: kiwix-tools as a system package, hard link with move fallback, a `kit-kiwix.service` user unit, and **port 6589** (supersedes the roadmap's `localhost:8080`).
+
+Found while implementing:
+1. **Tools are checked first.** `kit install` verifies `kiwix-manage`, `kiwix-serve` and `systemctl` before downloading anything, so a missing package costs seconds, not an 18 GB download.
+2. **The state lock is not held while downloading**, only while installing; `kit status` and `kit verify` keep working during a long download. A second installer at the same time is refused ("another kit process ...").
+3. **`kit install` skips packages that are already current** (same checksum recorded). A re-run is a no-op and downloads nothing.
+4. **Install order for crash safety:** place the file, write the state, remove files of an older version, then reconcile (library, unit, service, portal). Uninstall saves the state first, then deletes files. A crash at any point is repaired by running the same command again. Orphaned files are never deleted automatically (after a move they could be the only copy).
+5. **A unit file without kit's marker line is never overwritten or removed.**
+6. **`--purge`** also removes the download engine's `.lock`, `.part` and `.part.state` leftovers and the empty `downloads/<id>/` directory.
+7. **A moved (not linked) file is the only copy:** uninstall without `--purge` warns that the data was deleted and `kit download` fetches it again.
+8. `--port` accepts 1024 and up. An occupied port is an error before the service is touched. If the service is already running, the check is skipped.
+9. **Tests:** the host (commands, unit dir, tool search path, HTTP probe, port check) is injected, so 130 of the install tests run against fakes and temp dirs. `tests/e2e_kiwix.rs` (opt-in, `--ignored`) runs the real `kiwix-manage` and `kiwix-serve` with a shim `systemctl`, still without touching systemd.

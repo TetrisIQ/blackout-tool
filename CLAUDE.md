@@ -7,6 +7,7 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - `make lint` - `cargo fmt --check` + `cargo clippy -D warnings`
 - `make build` - release binary at `target/release/kit`
 - `test/accept_5gb.sh` - manual Phase 2 acceptance (5 GB, kill -9, outages; needs 5+ GB free in `$TMPDIR`, which should not be a tmpfs)
+- `KIT_E2E_ZIM=/path/small.zim cargo test --test e2e_kiwix -- --ignored` - opt-in end-to-end test with real kiwix-tools (no systemd involved)
 - `cargo run -- plan --profile mini` - try the CLI (needs network or a warm cache; `--offline` for cache only)
 
 ## Rules
@@ -27,4 +28,5 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - Exit codes of `kit`: 0 ok, 1 error, 3 `kit plan` / `kit download` refused for insufficient disk space.
 - Downloads: the engine (`download::download`) only talks to the `RangeSource` and `Progress` traits; unit tests use an in-memory fake, integration tests use `tests/common/server.rs` (a real localhost HTTP server with fault injection, also used by `examples/fake_server.rs`).
 - Sizes are decimal (1 GB = 10^9 bytes).
-- Keep placeholder modules (`install`, `netcfg`, `services`, `ui`) empty until their phase.
+- Installers: all host access goes through `install::Ctx` (command runner, unit dir, tool search path, HTTP probe). Tests build a `Ctx` from temp dirs and `FakeRunner`; never call `systemctl` or write to `~/.config` in tests. State is in `<data-dir>/state/installed.json`; library XML, unit and portal are derived from it by `install::reconcile`.
+- Keep placeholder modules (`netcfg`, `services`, `ui`) empty until their phase.
