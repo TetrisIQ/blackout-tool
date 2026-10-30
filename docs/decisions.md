@@ -122,7 +122,7 @@ Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay
 
 # Phase 3 - Package installers, ZIM first (PROPOSED, awaiting confirmation)
 
-Goal (roadmap): `kit install wikipedia_de_nopic` yields a working local Wikipedia at `http://localhost:8080`.
+Goal (roadmap): `kit install wikipedia_de_nopic` yields a working local Wikipedia at `http://localhost:6589`.
 
 ## P3-1. Installer interface
 ```rust
@@ -149,15 +149,15 @@ Roadmap rule 2: root only for specific, explained steps. Installing packages is 
 
 ## P3-6. Service: systemd user unit `kit-kiwix.service`
 - File: `~/.config/systemd/user/kit-kiwix.service`, first line `# Managed by kit (emergency-kit). Remove with: kit uninstall`.
-- `ExecStart=<kiwix-serve> --library --monitorLibrary --address 127.0.0.1 --port 8080 <data-dir>/library/library.xml`; `Restart=on-failure`; no root.
+- `ExecStart=<kiwix-serve> --library --monitorLibrary --address 127.0.0.1 --port 6589 <data-dir>/library/library.xml`; `Restart=on-failure`; no root.
 - `--monitorLibrary` makes `kiwix-serve` pick up library changes without a restart (to verify against Debian's older kiwix-tools; if unsupported there, kit restarts the service instead).
 - Bound to `127.0.0.1` for now. Phase 4 puts Caddy in front, Phase 9 opens it to the hotspot, deliberately, not by accident.
-- Port 8080 by default, `--port` to change; an occupied port is a clear error, never a silent switch.
+- Port **6589** by default (chosen by the project owner instead of the roadmap's 8080, which collides with many dev servers; it is below the ephemeral range, so outgoing connections will not take it). `--port` to change; an occupied port is a clear error, never a silent switch.
 - Uninstalling the last ZIM stops, disables and removes the unit and runs `daemon-reload`, so nothing of ours is left behind.
 - Starting at boot without a login session needs `loginctl enable-linger` (root); `kit` prints this as a hint, it is not done silently. It matters for the live image and the hotspot (later phases).
 
 ## P3-7. Landing page stub
-`<data-dir>/portal/index.html` (static, generated from the state: title, size, version, license and a link per installed ZIM to `http://localhost:8080/viewer#<book>`) plus `installed.json` for the later portal. `kiwix-serve` already shows its own library page at `:8080`; the real portal on a friendly domain is Phase 5.
+`<data-dir>/portal/index.html` (static, generated from the state: title, size, version, license and a link per installed ZIM to `http://localhost:6589/viewer#<book>`) plus `installed.json` for the later portal. `kiwix-serve` already shows its own library page at `:6589`; the real portal on a friendly domain is Phase 5.
 
 ## P3-8. CLI
 - `kit install --profile <id> | --select a,b [--data-dir] [--port] [--no-download]` downloads (Phase 2 engine, with its disk check) and installs. `--dry-run` prints the plan.
@@ -174,4 +174,4 @@ Roadmap rule 2: root only for specific, explained steps. Installing packages is 
 1. kiwix-tools as a system package (you run `sudo pacman -S kiwix-tools` for the acceptance test), per P3-5: OK?
 2. Hard link into `library/` with move fallback (P3-3): OK?
 3. May I create the `kit-kiwix.service` user unit on this machine for the manual acceptance test (P3-6)? Removal is `kit uninstall`.
-4. Bind to 127.0.0.1:8080 for now (P3-6): OK?
+4. ~~Bind to 127.0.0.1:8080~~ **Decided:** 127.0.0.1:6589 (supersedes the roadmap's `localhost:8080` acceptance URL).
