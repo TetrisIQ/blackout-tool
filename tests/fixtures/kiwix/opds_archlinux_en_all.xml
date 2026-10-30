@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:dc="http://purl.org/dc/terms/"
+      xmlns:opds="https://specs.opds.io/opds-1.2"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <id>a9f7a1a0-5fbf-169c-334c-efe807b31e7b</id>
+
+  <link rel="self"
+        href="/catalog/v2/entries?name=archlinux_en_all&amp;count=50"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  <link rel="start"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link rel="up"
+        href="/catalog/v2/root.xml"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+
+  <title>Filtered Entries (name=archlinux_en_all&amp;count=50)</title>
+  <updated>2026-10-30T17:03:25Z</updated>
+  <totalResults>1</totalResults>
+  <startIndex>0</startIndex>
+  <itemsPerPage>1</itemsPerPage>
+  <entry>
+    <id>urn:uuid:fbfdc6a7-8d63-f6c8-7580-f6a6faf3b1dd</id>
+    <title>ArchWiki</title>
+    <updated>2026-10-21T00:00:00Z</updated>
+    <summary>Arch Linux documentation</summary>
+    <language>eng</language>
+    <name>archlinux_en_all</name>
+    <flavour>maxi</flavour>
+    <category></category>
+    <tags>Linux distro;archlinux;_pictures:yes;_videos:no;_details:yes;_ftindex:yes</tags>
+    <articleCount>16485</articleCount>
+    <mediaCount>88</mediaCount>
+    <link rel="http://opds-spec.org/image/thumbnail"
+          href="/catalog/v2/illustration/fbfdc6a7-8d63-f6c8-7580-f6a6faf3b1dd/?size=48"
+          type="image/png;width=48;height=48;scale=1"/>
+    <link type="text/html" href="https://browse.library.kiwix.org/content/archlinux_en_all_maxi_2026-10" />
+    <author>
+      <name>Archlinux</name>
+    </author>
+    <publisher>
+      <name>openZIM</name>
+    </publisher>
+    <dc:issued>2026-10-21T00:00:00Z</dc:issued>
+    <link rel="http://opds-spec.org/acquisition/open-access" type="application/x-zim" href="https://lb.download.kiwix.org/zim/other/archlinux_en_all_maxi_2026-10.zim.meta4" length="38311936" />
+  </entry>
+</feed>

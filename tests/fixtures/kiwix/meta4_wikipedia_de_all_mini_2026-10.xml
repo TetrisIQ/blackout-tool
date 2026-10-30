@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <generator>MirrorBrain/2.19.0</generator>
+  <origin dynamic="true">https://lb.download.kiwix.org/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim.meta4</origin>
+  <published>2026-10-30T17:03:25Z</published>
+  <publisher>
+    <name>Kiwix project</name>
+    <url>https://kiwix.org</url>
+  </publisher>
+
+  <file name="wikipedia_de_all_mini_2026-10.zim">
+    <size>4686161304</size>
+
+    <!-- <mtime>1790968967</mtime> -->
+
+    <!-- internal id: 10361 -->
+    <hash type="md5">d642114742922272c8e77683d8241128</hash>
+    <hash type="sha-1">637997af671facc584911729baaa3268772df49c</hash>
+    <hash type="sha-256">0e281a87af92a798297fc671f8b37004cb7874ac051e13876b7335be96649e59</hash>
+
+
+    <!-- Found 9 mirrors: 0 in the same network prefix, 0 in the same autonomous system,
+         1 handling this country, 5 in the same region, 2 elsewhere -->
+
+    <!-- Mirrors in the same network (unknown): -->
+
+    <!-- Mirrors in the same AS (unknown): -->
+
+    <!-- Mirrors which handle this country (DE): -->
+    <url location="de" priority="1">https://ftp.fau.de/kiwix/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+
+    <!-- Mirrors in the same continent (EU): -->
+    <url location="dk" priority="2">https://mirrors.dotsrc.org/kiwix/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+    <url location="se" priority="3">https://mirror.accum.se/mirror/kiwix.org/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+    <url location="nl" priority="4">https://ftp.nluug.nl/pub/kiwix/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+    <url location="fr" priority="5">https://mirror.download.kiwix.org/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+    <url location="gb" priority="6">https://www.mirrorservice.org/sites/download.kiwix.org/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+
+    <!-- Mirrors in the rest of the world: -->
+    <url location="us" priority="7">https://wi.mirror.driftle.ss/kiwix/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+    <url location="us" priority="8">https://dumps.wikimedia.org/kiwix/zim/wikipedia/wikipedia_de_all_mini_2026-10.zim</url>
+  </file>
+</metalink>
