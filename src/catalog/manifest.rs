@@ -92,6 +92,28 @@ pub struct Manifest {
     /// Hook ids run after installation; the set of valid hooks is defined in Phase 3.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub post_install: Vec<String>,
+    /// Host names the package replaces locally (Phase 4), e.g. `de.wikipedia.org`. Each gets a
+    /// hosts entry, a vhost and a place in the local CA's name constraints. Exact hosts only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirror_domains: Vec<String>,
+}
+
+/// A plain lowercase DNS host name with at least two labels; no wildcards, ports or IPs.
+pub fn is_valid_host(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() >= 2
+        && host.len() <= 253
+        && labels.iter().all(|l| {
+            !l.is_empty()
+                && l.len() <= 63
+                && !l.starts_with('-')
+                && !l.ends_with('-')
+                && l.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+        && !labels
+            .last()
+            .is_some_and(|t| t.bytes().all(|b| b.is_ascii_digit()))
 }
 
 pub fn is_valid_id(id: &str) -> bool {
@@ -158,6 +180,19 @@ impl Manifest {
         }
         if self.post_install.iter().any(|h| blank(h)) {
             errs.push("post_install must not contain empty hook ids".into());
+        }
+        let mut hosts = std::collections::HashSet::new();
+        for d in &self.mirror_domains {
+            if !is_valid_host(d) {
+                errs.push(format!(
+                    "mirror_domains entry {d:?} must be a lowercase host name like de.wikipedia.org"
+                ));
+            } else if !hosts.insert(d) {
+                errs.push(format!("mirror_domains lists {d:?} more than once"));
+            }
+        }
+        if !self.mirror_domains.is_empty() && self.kind != PackageType::Zim {
+            errs.push("mirror_domains is only valid for type zim".into());
         }
         if self.depends_on.contains(&self.id) {
             errs.push("depends_on must not contain the package itself".into());

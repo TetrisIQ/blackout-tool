@@ -10,3 +10,4 @@ license:
   url: https://creativecommons.org/licenses/by-sa/4.0/
   attribution: Wikipedia contributors
 languages: [en]
+mirror_domains: [en.wikipedia.org, en.m.wikipedia.org]

@@ -321,6 +321,7 @@ pub(crate) mod tests {
             languages: vec![],
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             post_install: vec![],
+            mirror_domains: vec![],
         }
     }
 
