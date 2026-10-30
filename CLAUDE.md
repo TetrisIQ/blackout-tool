@@ -6,6 +6,7 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - `make test` - unit and integration tests (no network, no host changes)
 - `make lint` - `cargo fmt --check` + `cargo clippy -D warnings`
 - `make build` - release binary at `target/release/kit`
+- `test/accept_5gb.sh` - manual Phase 2 acceptance (5 GB, kill -9, outages; needs 5+ GB free in `$TMPDIR`, which should not be a tmpfs)
 - `cargo run -- plan --profile mini` - try the CLI (needs network or a warm cache; `--offline` for cache only)
 
 ## Rules
@@ -23,6 +24,7 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - Rust, edition 2024, library crate `emergency_kit` plus thin binary `kit` (`src/main.rs`). Logic lives in the library so it is testable.
 - Network and disk access go through traits (`catalog::http::Http`, `diskspace::FreeSpace`); tests inject fakes. Kiwix fixtures in `tests/fixtures/kiwix/` are recorded from the live service. Re-record them if the catalog format changes.
 - Manifests: `catalog/<category>/<id>.yaml`, file name = id, unknown keys rejected. Profiles: `catalog/profiles/<id>.yaml`. `Catalog::load` reports all problems at once; `shipped_catalog_is_valid` keeps the shipped catalog honest.
-- Exit codes of `kit`: 0 ok, 1 error, 3 `kit plan` refused for insufficient disk space.
+- Exit codes of `kit`: 0 ok, 1 error, 3 `kit plan` / `kit download` refused for insufficient disk space.
+- Downloads: the engine (`download::download`) only talks to the `RangeSource` and `Progress` traits; unit tests use an in-memory fake, integration tests use `tests/common/server.rs` (a real localhost HTTP server with fault injection, also used by `examples/fake_server.rs`).
 - Sizes are decimal (1 GB = 10^9 bytes).
-- Keep placeholder modules (`download`, `install`, `netcfg`, `services`, `ui`) empty until their phase.
+- Keep placeholder modules (`install`, `netcfg`, `services`, `ui`) empty until their phase.

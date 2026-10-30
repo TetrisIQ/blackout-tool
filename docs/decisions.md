@@ -74,7 +74,7 @@ Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay
 
 ---
 
-# Phase 2 - Download engine (PROPOSED, awaiting confirmation)
+# Phase 2 - Download engine (CONFIRMED, implemented)
 
 ## P2-1. Blocking I/O with worker threads, no async runtime
 `ureq` is already in use and supports `Range` requests with streaming bodies. A pool of N threads (default 4) each fetches chunks and writes them with positional writes (`FileExt::write_at`) into a pre-allocated `.part` file. This avoids `tokio`, keeps the binary small, and downloads are bandwidth-bound, not connection-bound. Revisit in Phase 8 only if the web UI needs async; it can wrap the engine.
@@ -109,7 +109,11 @@ Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay
 - Acceptance script in `test/` for the roadmap's 5 GB case: generates a deterministic 5 GB stream on the fly (no disk needed on the server side), serves it locally, kills the client with `kill -9`, drops the connection repeatedly, and asserts the final checksum. Run manually, not in CI.
 - Metalink/torrent (roadmap: optional) is deferred; the `.meta4` mirror list is already used.
 
-## P2 open questions
-1. Threads + `ureq` instead of `tokio`: OK?
-2. Is a new `kit download` command OK (fetch only, install comes in Phase 3)?
-3. The 5 GB acceptance test runs against a local fake server, not a real Kiwix mirror, because real "network loss" is not reproducible. A small real download (ArchWiki, 38 MB) can be added as a manual smoke test. OK?
+## P2 deviations from the proposal (found while implementing)
+1. **No ETag / Last-Modified validators.** Mirrors of one file carry different validators, and the catalog's size and SHA-256 are the authority anyway. A resume is trusted only if name, size and checksum in the state match the catalog **and** the `.part` file has the exact size; the final SHA-256 check catches anything else (a changed upstream file ends in "checksum mismatch", the partial data is deleted).
+2. **The temp-space reserve in `kit plan` is gone.** Phase 1 reserved the largest package on top of the total. Since `<name>.part` is renamed to the final name, no extra space is needed, so required = total + 5 % margin. This is why Standard needs ~210 GB instead of 343 GB.
+3. **Plain `http://` is accepted for loopback addresses only** (`127.0.0.1`, `localhost`, `[::1]`) in manifests, so tests can serve files locally. Everything else must be `https://`.
+4. **Disk space is reserved up front** with `fallocate` when a download starts, so a full disk fails immediately (`kit` exits with code 3 from the preflight, or an error naming the directory) instead of hours in. Filesystems without `fallocate` fall back to a sparse file.
+5. **Extra flags:** `--chunk-size` (advanced; a resumed download keeps the size it started with) and `--retries`. With the defaults (10 attempts, 1 s base, 60 s cap) a chunk survives an outage of roughly 3 to 5 minutes inside one run; after that `kit` exits non-zero and the next run continues from the saved state.
+6. **Layout:** files go to `<data-dir>/downloads/<package-id>/<file-name>` with `<name>.part`, `<name>.part.state` and a `<name>.lock` (left in place after finishing; flock needs a stable inode).
+7. Metalink/torrent support stays deferred; mirrors from the `.meta4` file are used.
