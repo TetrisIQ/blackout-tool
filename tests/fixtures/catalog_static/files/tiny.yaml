@@ -1,0 +1,11 @@
+id: tiny
+name: Tiny test package
+description: Static package used by the CLI integration tests
+category: files
+type: files
+source:
+  url: https://example.org/tiny.tar
+sha256: 0e281a87af92a798297fc671f8b37004cb7874ac051e13876b7335be96649e59
+size_bytes: 1000
+license:
+  spdx: CC0-1.0
