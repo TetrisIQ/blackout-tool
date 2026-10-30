@@ -1,0 +1,12 @@
+id: archwiki_en
+name: ArchWiki
+description: Arch Linux documentation; useful for any Linux system.
+category: reference
+type: zim
+source:
+  kiwix: {name: archlinux_en_all, flavour: maxi, lang: eng}
+license:
+  spdx: GFDL-1.3-or-later
+  url: https://www.gnu.org/licenses/fdl-1.3.html
+  attribution: ArchWiki contributors
+languages: [en]

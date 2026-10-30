@@ -1,0 +1,16 @@
+id: full
+name: Full
+description: Standard plus Stack Overflow and all of Project Gutenberg. Fits a 1 TB drive; more content arrives with later phases.
+budget_bytes: 1000000000000
+packages:
+  - wikipedia_en_maxi
+  - wikipedia_de_maxi
+  - wiktionary_en_nopic
+  - wikibooks_en_nopic
+  - wikivoyage_en_nopic
+  - wikisource_en_nopic
+  - archwiki_en
+  - askubuntu_en
+  - superuser_en
+  - stackoverflow_en
+  - gutenberg_en

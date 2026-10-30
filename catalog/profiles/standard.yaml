@@ -1,0 +1,14 @@
+id: standard
+name: Standard
+description: Full English and German Wikipedia with images, dictionary, source texts and Linux Q&A. Fits a 256 GB drive.
+budget_bytes: 250000000000
+packages:
+  - wikipedia_en_maxi
+  - wikipedia_de_maxi
+  - wiktionary_en_nopic
+  - wikibooks_en_nopic
+  - wikivoyage_en_nopic
+  - wikisource_en_nopic
+  - archwiki_en
+  - askubuntu_en
+  - superuser_en

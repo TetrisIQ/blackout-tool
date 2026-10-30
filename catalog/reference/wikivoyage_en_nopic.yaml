@@ -1,0 +1,12 @@
+id: wikivoyage_en_nopic
+name: Wikivoyage (English)
+description: Travel guides for destinations worldwide.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikivoyage_en_all, flavour: nopic, lang: eng}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikivoyage contributors
+languages: [en]

@@ -1,0 +1,10 @@
+id: mini
+name: Mini
+description: German Wikipedia, English Wikipedia intros, textbooks, travel guides and Linux basics. Fits a 64 GB drive.
+budget_bytes: 50000000000
+packages:
+  - wikipedia_de_nopic
+  - wikipedia_en_mini
+  - wikibooks_en_nopic
+  - wikivoyage_en_nopic
+  - archwiki_en

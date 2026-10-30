@@ -1,0 +1,12 @@
+id: wikisource_en_nopic
+name: Wikisource (English)
+description: Library of source texts in the public domain or freely licensed.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikisource_en_all, flavour: nopic, lang: eng}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikisource contributors
+languages: [en]

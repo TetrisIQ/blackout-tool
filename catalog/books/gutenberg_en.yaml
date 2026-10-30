@@ -1,0 +1,12 @@
+id: gutenberg_en
+name: Project Gutenberg (English)
+description: All English books of Project Gutenberg (public domain in the US).
+category: books
+type: zim
+source:
+  kiwix: {name: gutenberg_en_all, lang: eng}
+license:
+  spdx: LicenseRef-Public-Domain-US
+  url: https://www.gutenberg.org/policy/permission.html
+  attribution: Project Gutenberg
+languages: [en]

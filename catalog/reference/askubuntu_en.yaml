@@ -1,0 +1,12 @@
+id: askubuntu_en
+name: Ask Ubuntu
+description: Q&A for Ubuntu users (Stack Exchange).
+category: reference
+type: zim
+source:
+  kiwix: {name: askubuntu.com_en_all, lang: eng}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Stack Exchange Inc. and user contributors; older posts are CC BY-SA 2.5/3.0
+languages: [en]
