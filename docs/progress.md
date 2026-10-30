@@ -37,12 +37,12 @@
 - The 5 GB test uses a local fake server because real network loss is not reproducible; the real-mirror smoke test covers redirects and TLS.
 - Several simultaneous `kit download` runs for *different* files are fine; for the same file the second is refused.
 
-## Phase 3 - Package installers, ZIM first (implemented; real-host acceptance pending)
+## Phase 3 - Package installers, ZIM first (done on ArchWiki; Wikipedia DE pending)
 - **Installer interface** (`src/install/`): `Installer { plan, install, verify, uninstall }` looked up by package type; `zim` implemented, other types fail early with "cannot be installed yet". Host access (commands, units, tool lookup, HTTP probe) is injected.
 - **State and reconcile**: `<data>/state/installed.json` (locked, atomic, never silently reset when corrupt) is the source of truth. `library.xml` is rebuilt from scratch with `kiwix-manage`, the systemd user unit `kit-kiwix.service` (`127.0.0.1:6589`, `--monitorLibrary` when supported, else a restart) is written only if changed, and a static landing page is generated in `<data>/portal/`. Removing the last package stops, disables and deletes the unit, the library file and the portal.
 - **CLI**: `kit install --profile|--select [--port] [--no-download] [--dry-run]`, `kit uninstall <id>... [--purge]`, `kit verify [<id>...] [--deep]` (file, size, optional SHA-256, library entry, unit, service active, and the server's own book count), `kit status`.
 - **Tests**: 50 new unit and CLI tests with fakes (the library suite grew from 117 to 167); one opt-in end-to-end test for real kiwix-tools. No test touches systemd, `~/.config` or the network (checked: no unit and no `~/.local/share/kit` exist after the suite).
-- **Not yet done**: the roadmap's acceptance on a real host. It needs `kiwix-tools` (`sudo pacman -S kiwix-tools`), which is not installed here. Until then, three guesses about the real tools are untested: `kiwix-manage <lib> add <zim>` argument order, `kiwix-serve --library --monitorLibrary --address= --port=` flags, and the `/viewer#<book>` link format in the landing page. `tests/e2e_kiwix.rs` checks the first two and the OPDS book count automatically.
+- **Real-host acceptance (2026-10-30, kiwix-tools 3.8.2, Arch):** `kit install --select archwiki_en` downloaded, verified, installed and started the unit; `kit verify --deep` passes 5/5, the book is served at `http://localhost:6589/`, a re-run is a no-op. The guessed `kiwix-manage ... add` order, the `kiwix-serve` flags and the `/viewer#<book>` link were all correct; the opt-in e2e test passes. One bug found: the unpaginated `/catalog/v2/entries` has no `totalResults`, so the probe now uses `?count=1`. Still open: `wikipedia_de_nopic` (18.6 GB) and old Debian kiwix-tools.
 
 ### Caveats
 - Starting at boot or after logout needs `loginctl enable-linger` (root). `kit install` prints this hint when lingering is off; it is never done silently.
