@@ -71,3 +71,45 @@ Development happens on Arch; the binary has no distro dependency. Integration te
 
 ## D10. Deferred
 Podman, Caddy, dnsmasq, systemd user services, and web UI vs. TUI (Phase 8) stay as recommended in the roadmap; they are not needed before their phases. The async runtime (likely `tokio`) is decided in Phase 2.
+
+---
+
+# Phase 2 - Download engine (PROPOSED, awaiting confirmation)
+
+## P2-1. Blocking I/O with worker threads, no async runtime
+`ureq` is already in use and supports `Range` requests with streaming bodies. A pool of N threads (default 4) each fetches chunks and writes them with positional writes (`FileExt::write_at`) into a pre-allocated `.part` file. This avoids `tokio`, keeps the binary small, and downloads are bandwidth-bound, not connection-bound. Revisit in Phase 8 only if the web UI needs async; it can wrap the engine.
+
+## P2-2. Files and state
+- Target `<dir>/<name>`, partial data in `<name>.part`, progress in `<name>.part.state` (JSON, written atomically via temp + rename after every completed chunk).
+- State holds: the source URL list, total size, expected sha256, chunk size (default 8 MiB), a bitmap of completed chunks, and the server validators (ETag / Last-Modified) of the first response.
+- On restart the state is validated against the manifest (size, sha256) and the server (`If-Range` / validator compare). On mismatch the partial file is discarded and the download restarts. Never resumes onto data it cannot trust.
+- Only whole chunks count as done, so a `kill -9` or power loss costs at most the chunks in flight. The `.part` file is `fsync`ed before the state records the chunk.
+- An exclusive lock file (`flock`) per target prevents two `kit` processes writing the same file.
+
+## P2-3. Retry, mirrors, bandwidth
+- Per-chunk retry with exponential backoff and jitter (1 s -> 60 s cap, 8 attempts), honoring `Retry-After`.
+- Source order: `url`, then `mirrors` in priority order. After repeated failures on one source a chunk switches to the next; a source that returns a different size or ignores `Range` is dropped for the rest of the run. All sources serve the same checksum-verified file, so mixing chunks from mirrors is safe.
+- `--limit-rate <bytes/s>` via a shared token bucket across threads. Default unlimited.
+
+## P2-4. Verification and finish
+- After the last chunk: stream the file through SHA-256 and compare to the checksum from the catalog (rule 7). On mismatch: delete `.part` and the state, report corruption, exit non-zero (no half-trusted file is ever left under the final name).
+- On success: `fsync`, atomic `rename` `.part` -> final, remove the state file. A file already present with the right size is re-verified, not re-downloaded; idempotent.
+
+## P2-5. Disk preflight and data directory
+- Data directory: `--data-dir` / `KIT_DATA_DIR`, default `$XDG_DATA_HOME/kit`, may be an external drive. Downloads go to `<data-dir>/downloads/`.
+- Preflight reuses the Phase 1 free-space check, but counts only the bytes still missing (partial files already on disk are credited) plus the 5 % margin. Temp space is the `.part` file itself, so no extra reserve.
+
+## P2-6. CLI
+`kit download --profile <id> | --select a,b [--data-dir D] [--jobs N] [--limit-rate R]` resolves the plan (including the disk check and refusal, exit code 3), then downloads sequentially package by package, showing progress. `kit` re-run continues. Installing is Phase 3; this phase only fetches and verifies.
+
+## P2-7. Testing (no real network, nothing on the host)
+- A small in-process test HTTP server (std `TcpListener`) with `Range`/`If-Range` support and injectable faults: connection reset mid-body, 5xx bursts, truncated bodies, flipped bytes, ignoring `Range`, a dead primary with a working mirror.
+- Unit tests: resume from state, state/server mismatch, corrupt checksum, mirror fallback, rate limiter, chunk bitmap, lock contention.
+- Integration test running the real `kit` binary against the test server, `kill -9`ing it mid-download, restarting, and checking the checksum (64 MiB in CI so it stays fast).
+- Acceptance script in `test/` for the roadmap's 5 GB case: generates a deterministic 5 GB stream on the fly (no disk needed on the server side), serves it locally, kills the client with `kill -9`, drops the connection repeatedly, and asserts the final checksum. Run manually, not in CI.
+- Metalink/torrent (roadmap: optional) is deferred; the `.meta4` mirror list is already used.
+
+## P2 open questions
+1. Threads + `ureq` instead of `tokio`: OK?
+2. Is a new `kit download` command OK (fetch only, install comes in Phase 3)?
+3. The 5 GB acceptance test runs against a local fake server, not a real Kiwix mirror, because real "network loss" is not reproducible. A small real download (ArchWiki, 38 MB) can be added as a manual smoke test. OK?
