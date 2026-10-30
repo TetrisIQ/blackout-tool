@@ -904,6 +904,14 @@ fn uninstall_cmd(args: &UninstallArgs, env: &Env, out: &mut dyn Write) -> Result
     for n in &notes {
         writeln!(out, "note: {n}")?;
     }
+    if paths.data_dir.join("net/state.json").exists() {
+        // Changing hosts/nft needs root, so it is never done as a side effect of an uninstall.
+        writeln!(
+            out,
+            "note: local HTTPS is enabled and may still serve removed packages; \
+             run `kit net enable` to refresh it or `kit net disable` to turn it off"
+        )?;
+    }
     Ok(Outcome::Ok)
 }
 
@@ -1777,6 +1785,7 @@ mod tests {
         assert!(Cli::try_parse_from(["kit", "net", "enable", "--listen-port", "80"]).is_err());
         assert!(Cli::try_parse_from(["kit", "net", "enable", "--dry-run", "--renew-ca"]).is_ok());
         assert!(Cli::try_parse_from(["kit", "net", "disable", "--remove-ca"]).is_ok());
+        assert!(Cli::try_parse_from(["kit", "net", "check", "--samples", "5", "--seed", "1"]).is_ok());
     }
 
     #[test]

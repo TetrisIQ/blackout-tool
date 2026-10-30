@@ -186,7 +186,7 @@ Found while implementing:
 
 ---
 
-# Phase 4 - Local domains over HTTPS (PROPOSED, awaiting confirmation)
+# Phase 4 - Local domains over HTTPS (CONFIRMED, implemented; browser acceptance pending)
 
 Goal (roadmap): with the cable unplugged, `https://de.wikipedia.org/wiki/Berlin` loads in Firefox and Chromium without warnings, and 50 random links work.
 
@@ -230,3 +230,15 @@ Already decided by the project owner: nftables redirect 443 -> 8443 (P4-4), `/et
 
 ## P4-9. Open question
 Chromium is not installed on this machine, so only Firefox (and `~/.pki/nssdb`) can be verified for real; Chromium coverage rests on the shared NSS path.
+
+## P4 decisions and deviations (found while implementing)
+1. **Name constraint = exact hosts, not registrable domains.** `mirror_domains` lists exact hosts (`de.wikipedia.org`, `de.m.wikipedia.org`); the CA is constrained to the union of all hosts in the shipped catalog, so a stolen key cannot sign `wikipedia.org` itself or any other host. Adding a package with a new host later needs `kit net enable --renew-ca` (new CA, old one is untrusted, new one trusted again).
+2. **Only Wikimedia projects have `mirror_domains` so far** (Wikipedia en/de, Wiktionary, Wikibooks, Wikisource, Wikivoyage en). ArchWiki (`/title/X`), Stack Exchange and Gutenberg need their own URL rewrites; hijacking `stackoverflow.com` without them would only break the site while online. `upload.wikimedia.org` is not mirrored: the ZIMs embed their images.
+3. **nftables table is `ip kit_net`, not `inet`.** Only IPv4 loopback is redirected and the hosts block is IPv4-only, so an `ip` table is enough and works on older kernels. The ruleset declares and deletes the table before creating it, so reloading never stacks a second redirect.
+4. **The redirect is not persisted across reboot** (`--persist` from the proposal is not implemented). `kit net status` reports a missing redirect and `kit net enable` restores it; a boot unit comes with the live image (Phase 11).
+5. **`kit uninstall` does not touch the network layer.** Changing hosts/nft needs root, so it prints a note to run `kit net enable` or `disable` instead of the proposal's automatic disable.
+6. **Root is explicit and local:** `sudo` is called per command (`cp` onto `/etc/hosts`, `nft -f`, `trust anchor` / `update-ca-certificates`), the plan with the reason for each `[root]` step is printed first, and `--dry-run` stops there. The unprivileged runner never receives these commands (tested).
+7. **Caddy config is validated before use:** `kit net enable` runs `caddy validate` and aborts without starting or changing anything privileged if it is rejected. The Caddyfile syntax could not be validated while writing it (caddy was not installed here); `tests/e2e_net.rs` (opt-in) runs the real thing.
+8. **Rewrites:** `/wiki/<Title>` is proxied (not redirected) to `/content/<book>/<Title>` so relative links inside the ZIM keep working; `/` redirects to the book; `/w/index.php?search=` and `/wiki/Special:Search` become kiwix `/search?content=<book>&pattern=`; everything unknown answers 404 with a "Not available offline" page. The book id is the ZIM file name without `.zim` (verified against kiwix-serve 3.8: `/content/archlinux_en_all_maxi_2026-10/Main_page`, with `A/...` redirecting).
+9. **`kit net check`** resolves only mirrored hosts (to Caddy) and trusts only the local CA, so a request that would leave the machine fails by construction. External `<a>` links are counted, not followed; embedded resources (img/script/css) from other hosts are reported as leaks.
+10. **Test hygiene:** spawning `openssl` from a library test could leave a forked child holding another test's `flock` for a moment (spurious "another kit process" failures). The X.509 check therefore lives in its own test binary, `tests/net_ca.rs`.

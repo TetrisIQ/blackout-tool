@@ -2,6 +2,7 @@
 
 pub mod ca;
 pub mod caddy;
+pub mod check;
 pub mod enable;
 pub mod hosts;
 pub mod nft;

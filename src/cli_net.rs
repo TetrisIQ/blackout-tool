@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 
 use crate::catalog::Catalog;
@@ -11,7 +11,9 @@ use crate::cli::{Env, Outcome};
 use crate::install::DEFAULT_PORT;
 use crate::install::Paths;
 use crate::install::state::StateGuard;
+use crate::netcfg::NetPaths;
 use crate::netcfg::caddy::{self, Mirror};
+use crate::netcfg::check;
 use crate::netcfg::enable::{self, Desired, NetCtx, Options, Step};
 
 #[derive(Debug, Args)]
@@ -44,6 +46,21 @@ pub enum NetAction {
         /// Also delete the local CA and its private key
         #[arg(long)]
         remove_ca: bool,
+        #[arg(long, env = "KIT_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+    },
+    /// Follow a random sample of links from a mirrored site through the local HTTPS front and
+    /// report everything that does not load or would reach outside this machine
+    Check {
+        /// Number of pages to load
+        #[arg(long, default_value_t = 50)]
+        samples: usize,
+        /// Start host (default: the first mirrored host)
+        #[arg(long)]
+        host: Option<String>,
+        /// Seed of the random sample, to repeat a run
+        #[arg(long)]
+        seed: Option<u64>,
         #[arg(long, env = "KIT_DATA_DIR")]
         data_dir: Option<PathBuf>,
     },
@@ -183,6 +200,55 @@ pub fn net_cmd(args: &NetArgs, catalog: &Catalog, env: &Env, out: &mut dyn Write
                 )?;
             }
             Ok(Outcome::Ok)
+        }
+        NetAction::Check {
+            samples,
+            host,
+            seed,
+            data_dir: dd,
+        } => {
+            let ctx = mk(data_dir(dd)?, caddy::DEFAULT_PORT, DEFAULT_PORT);
+            let Some(state) = enable::load_state(&ctx)? else {
+                bail!("local HTTPS is not enabled; run `kit net enable` first");
+            };
+            let start = match host {
+                Some(h) if state.hosts.contains(h) => h.clone(),
+                Some(h) => bail!(
+                    "{h} is not a mirrored host (mirrored: {})",
+                    state.hosts.join(", ")
+                ),
+                None => state
+                    .hosts
+                    .iter()
+                    .find(|h| !h.contains(".m."))
+                    .or(state.hosts.first())
+                    .cloned()
+                    .unwrap_or_default(),
+            };
+            let ca_pem = std::fs::read(NetPaths::new(&ctx.data_dir).ca_dir().join("ca.pem"))?;
+            let fetch = check::PinnedFetch::new(state.hosts.clone(), state.listen_port, &ca_pem)?;
+            let seed = seed.unwrap_or_else(crate::cli::unix_now);
+            writeln!(
+                out,
+                "Checking {samples} pages starting at https://{start}/ (seed {seed}) ..."
+            )?;
+            out.flush()?;
+            let report = check::check(&fetch, &state.hosts, &start, *samples, seed);
+            writeln!(
+                out,
+                "{} pages and {} resources loaded; {} links to other sites (not followed).",
+                report.pages_checked, report.resources_checked, report.external_links
+            )?;
+            for p in &report.problems {
+                writeln!(out, "[FAIL] {p}")?;
+            }
+            if report.problems.is_empty() {
+                writeln!(out, "No problems found; nothing left this machine.")?;
+                Ok(Outcome::Ok)
+            } else {
+                writeln!(out, "{} problems.", report.problems.len())?;
+                Ok(Outcome::ChecksFailed)
+            }
         }
         NetAction::Status { data_dir: dd } => {
             let ctx = mk(data_dir(dd)?, caddy::DEFAULT_PORT, DEFAULT_PORT);

@@ -8,6 +8,8 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - `make build` - release binary at `target/release/kit`
 - `test/accept_5gb.sh` - manual Phase 2 acceptance (5 GB, kill -9, outages; needs 5+ GB free in `$TMPDIR`, which should not be a tmpfs)
 - `KIT_E2E_ZIM=/path/small.zim cargo test --test e2e_kiwix -- --ignored` - opt-in end-to-end test with real kiwix-tools (no systemd involved)
+- `test/accept_net.sh` - manual Phase 4 acceptance (needs caddy, nftables, sudo; changes hosts/nft/trust and undoes them)
+- `KIT_E2E_ZIM=/path/small.zim cargo test --test e2e_net -- --ignored` - opt-in end-to-end test with real caddy and kiwix-serve (no host changes)
 - `cargo run -- plan --profile mini` - try the CLI (needs network or a warm cache; `--offline` for cache only)
 
 ## Rules
@@ -29,4 +31,5 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - Downloads: the engine (`download::download`) only talks to the `RangeSource` and `Progress` traits; unit tests use an in-memory fake, integration tests use `tests/common/server.rs` (a real localhost HTTP server with fault injection, also used by `examples/fake_server.rs`).
 - Sizes are decimal (1 GB = 10^9 bytes).
 - Installers: all host access goes through `install::Ctx` (command runner, unit dir, tool search path, HTTP probe). Tests build a `Ctx` from temp dirs and `FakeRunner`; never call `systemctl` or write to `~/.config` in tests. State is in `<data-dir>/state/installed.json`; library XML, unit and portal are derived from it by `install::reconcile`.
-- Keep placeholder modules (`netcfg`, `services`, `ui`) empty until their phase.
+- Network layer (`netcfg`): host access goes through `NetCtx` (an unprivileged and a root `CommandRunner`, hosts path, unit dir, home); tests use temp dirs and `FakeRunner`. Only the root runner may receive `cp /etc/hosts`, `nft`, `trust`. Don't spawn processes in library unit tests (inherited `flock`s); use `tests/`.
+- Keep placeholder modules (`services`, `ui`) empty until their phase.
