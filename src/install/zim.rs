@@ -738,7 +738,7 @@ mod tests {
         let runner = healthy();
         install(&env, &runner, &env.download("a", "a.zim", 10)).unwrap();
         let st = StateGuard::open(&env.paths).unwrap();
-        let url = "http://127.0.0.1:6589/catalog/v2/entries";
+        let url = "http://127.0.0.1:6589/catalog/v2/entries?count=1";
 
         let probe = FakeHttp::default().with(url, "<feed><totalResults>1</totalResults></feed>");
         let checks = super::super::reconcile::verify_service(&env.ctx(&runner, &probe), &st);

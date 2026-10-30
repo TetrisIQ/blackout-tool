@@ -1472,7 +1472,7 @@ mod tests {
         let dd = data.path().to_str().unwrap();
         let (mut host, calls) = bytes_host();
         host.probe = FakeHttp::default().with(
-            "http://127.0.0.1:6589/catalog/v2/entries",
+            "http://127.0.0.1:6589/catalog/v2/entries?count=1",
             "<feed><totalResults>1</totalResults></feed>",
         );
 

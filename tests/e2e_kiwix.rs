@@ -169,8 +169,8 @@ fn install_serve_verify_uninstall_with_real_kiwix_tools() {
     // The server really serves the book.
     let deadline = Instant::now() + Duration::from_secs(15);
     let feed = loop {
-        let feed =
-            TcpStream::connect(("127.0.0.1", sb.port)).map(|_| http_get(sb.port, "/catalog/v2/entries"));
+        let feed = TcpStream::connect(("127.0.0.1", sb.port))
+            .map(|_| http_get(sb.port, "/catalog/v2/entries?count=1"));
         match feed {
             Ok(f) if f.contains("<totalResults>1</totalResults>") => break f,
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(300)),
@@ -187,7 +187,7 @@ fn install_serve_verify_uninstall_with_real_kiwix_tools() {
     let out = sb.kit(&["install", "--select", "e2e", "--no-download", "--port", &port]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(text(&out).contains("already installed"));
-    assert!(http_get(sb.port, "/catalog/v2/entries").contains("<totalResults>1</totalResults>"));
+    assert!(http_get(sb.port, "/catalog/v2/entries?count=1").contains("<totalResults>1</totalResults>"));
 
     let out = sb.kit(&["uninstall", "e2e", "--purge"]);
     assert!(out.status.success(), "{}", text(&out));

@@ -270,7 +270,7 @@ pub fn verify_service(ctx: &Ctx, state: &State) -> Vec<Check> {
         },
     ));
 
-    let url = format!("http://127.0.0.1:{}/catalog/v2/entries", ctx.port);
+    let url = format!("http://127.0.0.1:{}/catalog/v2/entries?count=1", ctx.port);
     // Right after (re)starting, the server may need a moment before it accepts connections.
     let mut answer = ctx.probe.get(&url);
     for _ in 0..3 {
