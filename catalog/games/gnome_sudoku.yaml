@@ -1,0 +1,12 @@
+id: gnome_sudoku
+name: GNOME Sudoku
+description: Sudoku with a generator for new puzzles at several difficulties.
+category: games
+type: flatpak
+source:
+  flatpak: org.gnome.Sudoku
+size_bytes: 2000000
+group: puzzle
+license:
+  spdx: GPL-3.0-or-later
+  url: https://gitlab.gnome.org/GNOME/gnome-sudoku/-/blob/main/COPYING

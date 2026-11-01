@@ -1,0 +1,12 @@
+id: frozen_bubble
+name: Frozen Bubble
+description: 'Bubble-shooter: clear the playfield by matching colours.'
+category: games
+type: flatpak
+source:
+  flatpak: org.frozen_bubble.frozen-bubble
+size_bytes: 104000000
+group: arcade
+license:
+  spdx: GPL-2.0-only
+  url: https://github.com/kthakore/frozen-bubble/blob/master/COPYING

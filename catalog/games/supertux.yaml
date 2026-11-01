@@ -1,0 +1,12 @@
+id: supertux
+name: SuperTux
+description: Jump-and-run platformer starring Tux, with many levels and a level editor.
+category: games
+type: flatpak
+source:
+  flatpak: org.supertuxproject.SuperTux
+size_bytes: 375000000
+group: arcade
+license:
+  spdx: GPL-3.0-or-later
+  url: https://github.com/SuperTux/supertux/blob/master/LICENSE.txt

@@ -42,6 +42,18 @@ pub struct ServiceRecord {
     pub image: String,
 }
 
+/// A local program (Flatpak) installed per user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppRecord {
+    /// Flatpak application id; `flatpak run <app_id>` starts it.
+    pub app_id: String,
+    /// Portal group (`arcade`, `strategy`, ...).
+    pub group: String,
+    /// kit installed it, so kit removes it again. An app that was there before stays.
+    pub by_kit: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
@@ -56,6 +68,8 @@ pub struct Record {
     pub files: Vec<FileRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<ServiceRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<AppRecord>,
 }
 
 impl Record {
@@ -90,6 +104,14 @@ impl State {
             .values()
             .filter(|r| r.kind == PackageType::Zim)
             .flat_map(|r| r.files.iter())
+            .collect()
+    }
+
+    /// Installed local programs, in a stable order.
+    pub fn apps(&self) -> Vec<(&Record, &AppRecord)> {
+        self.packages
+            .values()
+            .filter_map(|r| r.app.as_ref().map(|a| (r, a)))
             .collect()
     }
 
@@ -196,6 +218,7 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
             moved: false,
         }],
         service: None,
+        app: None,
     }
 }
 

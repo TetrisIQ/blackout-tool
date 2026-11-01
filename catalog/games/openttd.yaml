@@ -1,0 +1,12 @@
+id: openttd
+name: OpenTTD
+description: Build and run a transport company with trains, road vehicles, ships and aircraft. The Flathub build bundles the free OpenGFX, OpenSFX and OpenMSX sets.
+category: games
+type: flatpak
+source:
+  flatpak: org.openttd.OpenTTD
+size_bytes: 202000000
+group: strategy
+license:
+  spdx: GPL-2.0-only
+  url: https://github.com/OpenTTD/OpenTTD/blob/master/COPYING.md

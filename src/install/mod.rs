@@ -3,6 +3,7 @@
 //! `<data-dir>/state/installed.json`; everything else is reconciled from it.
 
 pub mod container;
+pub mod flatpak;
 pub mod media;
 pub mod portal;
 pub mod reconcile;
@@ -167,6 +168,9 @@ pub struct InstallInput {
     pub service: Option<crate::catalog::manifest::ServiceSpec>,
     /// `files` packages feeding a service: where and how they are unpacked.
     pub content: Option<crate::catalog::manifest::ContentSpec>,
+    /// `flatpak` packages: the Flathub application id and the portal group.
+    pub flatpak: Option<String>,
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +207,7 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Zim => Ok(Box::new(zim::ZimInstaller)),
         PackageType::Container => Ok(Box::new(container::ContainerInstaller)),
         PackageType::Files => Ok(Box::new(media::MediaInstaller)),
+        PackageType::Flatpak => Ok(Box::new(flatpak::FlatpakInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",
             other.as_str()

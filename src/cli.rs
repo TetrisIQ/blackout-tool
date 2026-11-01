@@ -510,6 +510,12 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
             k.lang.as_deref().unwrap_or("any")
         )?;
     }
+    if let Some(a) = &m.source.flatpak {
+        writeln!(out, "  flatpak:    {a} (Flathub)")?;
+    }
+    if let Some(g) = &m.group {
+        writeln!(out, "  group:      {g}")?;
+    }
     if let Some(i) = &m.source.image {
         writeln!(out, "  image:      {i}")?;
     }
@@ -822,6 +828,9 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
             && !paths.credentials_file(&item.id).exists();
         return r.service.as_ref().map(|s| s.image.as_str()) == image && image.is_some() && !unprovisioned;
     }
+    if item.kind == crate::catalog::PackageType::Flatpak {
+        return r.app.is_some();
+    }
     r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref()
 }
 
@@ -844,6 +853,8 @@ fn install_input(
         image: manifest.source.image.clone(),
         service: manifest.service.clone(),
         content: manifest.content.clone(),
+        flatpak: manifest.source.flatpak.clone(),
+        group: manifest.group.clone(),
     }
 }
 
@@ -852,6 +863,9 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
     use crate::catalog::PackageType as T;
     if has_zims || kinds.contains(&T::Zim) {
         ensure_tools(ctx)?;
+    }
+    if kinds.contains(&T::Flatpak) {
+        tools::require("flatpak", &ctx.search_path)?;
     }
     if kinds.contains(&T::Container) {
         for t in ["podman", "systemctl"] {

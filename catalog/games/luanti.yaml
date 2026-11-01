@@ -1,0 +1,12 @@
+id: luanti
+name: Luanti
+description: Block-based sandbox for building and exploring, with mods and a single-player mode (formerly Minetest).
+category: games
+type: flatpak
+source:
+  flatpak: org.luanti.luanti
+size_bytes: 29000000
+group: sandbox
+license:
+  spdx: LGPL-2.1-or-later AND CC-BY-SA-3.0 AND MIT AND Apache-2.0
+  url: https://github.com/luanti-org/luanti/blob/master/LICENSE.txt

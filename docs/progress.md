@@ -128,3 +128,19 @@ Found by the first real install of the test profile: no login, no library.
 - **Download file names** are percent-decoded (`%20` -> space); a decoded `/` is still refused.
 - **Not done, on purpose:** Internet Archive films and Jamendo/FMA. IA items carry licence claims set by the uploaders (the "free" Kevin MacLeod items there say BY-ND or nothing), and the one Chaplin short checked had no video file. Jamendo needs an API key and FMA has no bulk download. These need a human legal review and a vetted list before they ship.
 - **Phase 6b (games)** is now its own phase in `ROADMAP.md`.
+
+## Phase 6b - Games as Flatpaks, grouped on the portal
+- **New package type `flatpak`** (`source.flatpak: <app id>`, remote fixed to Flathub, `group:` required, `size_bytes` estimated). Groups (fixed list, `APP_GROUPS`): arcade, strategy, puzzle, sandbox, racing, board. No `url`/`sha256`: Flatpak verifies Flathub's signed commits itself.
+- **13 games in `catalog/games/`**, all FOSS with the licence from the Flathub appstream data: Luanti (sandbox); OpenTTD, Freeciv, 0 A.D., Battle for Wesnoth (strategy); SuperTux, Frozen Bubble, Quadrapassel (arcade); SuperTuxKart (racing); GNOME Sudoku, Mines (puzzle); GNOME Chess, Aisleriot (board). `size_bytes` is the app's installed size without runtimes.
+- **Installer** (`install::flatpak`): adds the `flathub` remote to the *user* installation only if it is missing there, `flatpak install --user --noninteractive`, records `app` (id, group, `by_kit`) in `installed.json`. Uninstall removes only what kit installed (`--purge` also deletes saved games); runtimes stay, with the command to clean them. Idempotent; a game that was there before is left alone.
+- **Portal:** section "Games and programs" with one list per group, licence and the command `flatpak run <id>`. A browser cannot start programs, so the desktop menu entry (exported by Flatpak) is the launcher; the portal names the command.
+- **Profiles:** `test` gets Luanti and Mines, `standard` the small games (no 0 A.D./SuperTuxKart/Wesnoth), `full` all of them.
+- **Verified for real** (isolated `FLATPAK_USER_DIR`, temp data dir; nothing on the host touched): `kit install --select gnome_mines` adds the remote, installs the app and its runtime, exports `org.gnome.Mines.desktop`; `verify` passes; the portal lists it; `uninstall` removes it and the portal. **Found there:** `flatpak remotes` without `--user` also lists a system-wide `flathub`, which cannot serve `--user` installs ("No remote refs found"); kit now looks at the user installation only.
+- **Tests:** 239 unit tests (new: manifest rules, installer against `FakeRunner`, portal groups); `shipped_catalog_is_valid`.
+
+### Caveats
+- The first install needs the internet (app plus runtime). Runtimes are shared and not in `size_bytes`: expect about 0.6 GB (freedesktop) and 0.8 GB (GNOME) once. For an offline-only machine, install while online first.
+- Freeciv on Flathub still uses the end-of-life 22.08 runtime. 0 A.D. is 3.7 GB installed; SuperTuxKart 0.8 GB.
+- That OpenTTD's Flathub build bundles OpenGFX/OpenSFX/OpenMSX comes from Flathub's description and was not started here. Not tried: actually starting a game (no display in this session).
+- Not pinned to a commit: a game updates when Flathub does and the user runs `flatpak update`. Distro packages are not supported, only Flatpak.
+- Licence strings are taken from Flathub's appstream data; the legal review of content sources stays open.

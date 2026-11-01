@@ -7,6 +7,7 @@ use std::path::Path;
 
 use super::state::State;
 use super::{DEFAULT_PORT, Paths, io_err};
+use crate::catalog::manifest::APP_GROUPS;
 use crate::plan::format_bytes;
 
 /// Host name of the portal behind the local HTTPS front.
@@ -120,7 +121,8 @@ pub fn render_page(state: &State, origin: Origin) -> String {
             format_utc(r.installed_at),
         ));
     }
-    if items.is_empty() {
+    let games = render_apps(state);
+    if items.is_empty() && games.is_empty() {
         items.push_str("    <li>Nothing installed yet.</li>\n");
     }
     let mut quick = String::new();
@@ -147,8 +149,38 @@ pub fn render_page(state: &State, origin: Origin) -> String {
          <button type=\"submit\">Search</button>\n</form>\n\
          <h2>Emergency</h2>\n<ul class=\"quick\">\n{quick}</ul>\n\
          <p><small>Emergency numbers: 112 (EU) · 110 police (DE) · 911 (US/CA)</small></p>\n\
-         <h2>Installed content</h2>\n<ul>\n{items}</ul>\n</body>\n</html>\n"
+         <h2>Installed content</h2>\n<ul>\n{items}</ul>\n{games}</body>\n</html>\n"
     )
+}
+
+/// Local programs (Flatpak), one list per group. A web page cannot start programs, so each entry
+/// names the desktop menu and the command.
+fn render_apps(state: &State) -> String {
+    let apps = state.apps();
+    if apps.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "<h2>Games and programs</h2>\n<p><small>These run on this computer, not in the browser: \
+         open them from the desktop menu or run the command shown.</small></p>\n",
+    );
+    for (key, heading) in APP_GROUPS {
+        let in_group: Vec<_> = apps.iter().filter(|(_, a)| a.group == *key).collect();
+        if in_group.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("<h3>{}</h3>\n<ul>\n", esc(heading)));
+        for (r, a) in in_group {
+            out.push_str(&format!(
+                "    <li><strong>{}</strong><br><small>licence {} · <code>flatpak run {}</code></small></li>\n",
+                esc(&r.name),
+                esc(&r.license),
+                esc(&a.app_id),
+            ));
+        }
+        out.push_str("</ul>\n");
+    }
+    out
 }
 
 /// Percent-encodes everything but unreserved characters; space becomes `+`.
@@ -239,6 +271,42 @@ mod tests {
             html.contains("Unterk%C3%BChlung"),
             "non-ASCII terms are percent-encoded"
         );
+    }
+
+    fn app(id: &str, name: &str, app_id: &str, group: &str) -> super::super::state::Record {
+        let mut r = sample_record(id, "x", 1);
+        r.name = name.into();
+        r.kind = crate::catalog::PackageType::Flatpak;
+        r.files.clear();
+        r.app = Some(super::super::state::AppRecord {
+            app_id: app_id.into(),
+            group: group.into(),
+            by_kit: true,
+        });
+        r
+    }
+
+    #[test]
+    fn games_are_listed_per_group_with_their_command() {
+        let mut st = State::default();
+        for (id, name, app_id, group) in [
+            ("luanti", "Luanti", "org.luanti.luanti", "sandbox"),
+            ("zeroad", "0 A.D.", "com.play0ad.zeroad", "strategy"),
+            ("wesnoth", "Wesnoth", "org.wesnoth.Wesnoth", "strategy"),
+        ] {
+            st.packages.insert(id.into(), app(id, name, app_id, group));
+        }
+        for html in [
+            render_index(&st),
+            render_page(&st, Origin::Front { host: "kit.local" }),
+        ] {
+            let strategy = html.find("Strategy and simulation").expect(&html);
+            let sandbox = html.find("Sandbox").expect(&html);
+            assert!(strategy < sandbox, "groups follow the fixed order");
+            assert!(html.contains("<code>flatpak run com.play0ad.zeroad</code>"));
+            assert!(!html.contains("Nothing installed yet"));
+            assert!(!html.contains("Arcade"), "empty groups are not shown");
+        }
     }
 
     #[test]

@@ -553,6 +553,7 @@ impl Installer for ContainerInstaller {
                     unit: unit_name(&input.id),
                     image: image.clone(),
                 }),
+                app: None,
             },
         );
         state.save()?;
@@ -797,6 +798,8 @@ mod tests {
                 image: Some(IMAGE.into()),
                 service: Some(spec()),
                 content: None,
+                flatpak: None,
+                group: None,
             }
         }
     }

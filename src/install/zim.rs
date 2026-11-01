@@ -141,6 +141,7 @@ impl Installer for ZimInstaller {
                     moved,
                 }],
                 service: None,
+                app: None,
             },
         );
         state.port = Some(ctx.port);
@@ -284,6 +285,8 @@ mod tests {
                 image: None,
                 service: None,
                 content: None,
+                flatpak: None,
+                group: None,
             }
         }
 

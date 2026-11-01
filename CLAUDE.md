@@ -32,4 +32,5 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - Sizes are decimal (1 GB = 10^9 bytes).
 - Installers: all host access goes through `install::Ctx` (command runner, unit dir, tool search path, HTTP probe). Tests build a `Ctx` from temp dirs and `FakeRunner`; never call `systemctl` or write to `~/.config` in tests. State is in `<data-dir>/state/installed.json`; library XML, unit and portal are derived from it by `install::reconcile`.
 - Network layer (`netcfg`): host access goes through `NetCtx` (an unprivileged and a root `CommandRunner`, hosts path, unit dir, home); tests use temp dirs and `FakeRunner`. Only the root runner may receive `cp /etc/hosts`, `nft`, `trust`. Don't spawn processes in library unit tests (inherited `flock`s); use `tests/`.
+- Flatpak games (`install::flatpak`): always `--user`; tests use `FakeRunner`. A manual check against the real Flathub must set `FLATPAK_USER_DIR` to a temp dir.
 - Keep placeholder modules (`services`, `ui`) empty until their phase.

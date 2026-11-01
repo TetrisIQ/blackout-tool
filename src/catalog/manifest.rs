@@ -8,6 +8,8 @@ pub enum PackageType {
     Zim,
     Files,
     Container,
+    /// A local program installed per user from Flathub (Phase 6b: games).
+    Flatpak,
     Apt,
     Model,
 }
@@ -18,6 +20,7 @@ impl PackageType {
             Self::Zim => "zim",
             Self::Files => "files",
             Self::Container => "container",
+            Self::Flatpak => "flatpak",
             Self::Apt => "apt",
             Self::Model => "model",
         }
@@ -65,6 +68,9 @@ pub struct Source {
     /// Container image reference (type `container`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
+    /// Flatpak application id on Flathub (type `flatpak`), e.g. `org.luanti.luanti`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flatpak: Option<String>,
     /// Distribution packages (type `apt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<String>,
@@ -130,6 +136,17 @@ pub struct ContentSpec {
 }
 
 pub const PROVISIONERS: &[&str] = &["navidrome", "audiobookshelf", "jellyfin", "kavita"];
+/// Groups of local programs on the portal, with their heading (English / German).
+pub const APP_GROUPS: &[(&str, &str)] = &[
+    ("arcade", "Arcade"),
+    ("strategy", "Strategy and simulation / Strategie"),
+    ("puzzle", "Puzzle / Denkspiele"),
+    ("sandbox", "Sandbox / Bauen und Erkunden"),
+    ("racing", "Racing / Rennen"),
+    ("board", "Board and card games / Brett- und Kartenspiele"),
+];
+/// The only Flatpak remote kit uses.
+pub const FLATPAK_REMOTE: &str = "flathub";
 pub const MEDIA_KINDS: &[&str] = &["music", "audiobooks", "video", "books", "games"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -158,6 +175,9 @@ pub struct Manifest {
     /// hosts entry, a vhost and a place in the local CA's name constraints. Exact hosts only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirror_domains: Vec<String>,
+    /// Portal group of a `flatpak` package (one of [`APP_GROUPS`]); required there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
     /// Required for `container` packages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<ServiceSpec>,
@@ -188,6 +208,17 @@ pub fn is_valid_id(id: &str) -> bool {
     let mut chars = id.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+/// A Flatpak application id: reverse-DNS, at least three dot-separated parts.
+fn is_app_id(id: &str) -> bool {
+    id.split('.').count() >= 3
+        && id.split('.').all(|p| {
+            !p.is_empty()
+                && !p.starts_with(|c: char| c.is_ascii_digit())
+                && p.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
 }
 
 fn is_sha256(s: &str) -> bool {
@@ -308,6 +339,19 @@ impl Manifest {
                 errs.push(format!("content.media must be one of {}", MEDIA_KINDS.join(", ")));
             }
         }
+        match (&self.group, self.kind) {
+            (Some(g), PackageType::Flatpak) => {
+                if !APP_GROUPS.iter().any(|(k, _)| k == g) {
+                    errs.push(format!(
+                        "group {g:?} must be one of {}",
+                        APP_GROUPS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
+                    ));
+                }
+            }
+            (Some(_), _) => errs.push("group is only valid for type flatpak".into()),
+            (None, PackageType::Flatpak) => errs.push("type flatpak needs a group".into()),
+            (None, _) => {}
+        }
         if let Some(i) = &self.source.image
             && !i.contains("@sha256:")
         {
@@ -361,6 +405,13 @@ impl Manifest {
                         errs.push("type container needs source.image".into());
                     }
                 }
+                PackageType::Flatpak => match s.flatpak.as_deref() {
+                    Some(a) if is_app_id(a) => {}
+                    Some(a) => errs.push(format!(
+                        "source.flatpak {a:?} must be an application id like org.luanti.luanti"
+                    )),
+                    None => errs.push("type flatpak needs source.flatpak".into()),
+                },
                 PackageType::Apt => {
                     if s.packages.is_empty() || s.packages.iter().any(|p| blank(p)) {
                         errs.push("type apt needs a non-empty source.packages list".into());
@@ -375,7 +426,16 @@ impl Manifest {
                     errs.push("source.url needs size_bytes".into());
                 }
             }
-            if matches!(self.kind, PackageType::Container | PackageType::Apt) && self.size_bytes.is_none() {
+            if self.kind == PackageType::Flatpak && (s.url.is_some() || self.sha256.is_some()) {
+                errs.push(
+                    "type flatpak takes no url or sha256 (Flathub signs and verifies the commits)".into(),
+                );
+            }
+            if matches!(
+                self.kind,
+                PackageType::Container | PackageType::Flatpak | PackageType::Apt
+            ) && self.size_bytes.is_none()
+            {
                 errs.push(format!(
                     "type {} needs an estimated size_bytes",
                     self.kind.as_str()
@@ -383,6 +443,9 @@ impl Manifest {
             }
         }
 
+        if s.flatpak.is_some() && self.kind != PackageType::Flatpak {
+            errs.push("source.flatpak is only valid for type flatpak".into());
+        }
         if let Some(u) = &s.url {
             check_https("source.url", u, &mut errs);
         }
@@ -446,6 +509,59 @@ license: {{spdx: CC0-1.0}}
         assert_eq!(m.kind, PackageType::Zim);
         assert_eq!(m.source.kiwix.as_ref().unwrap().flavour.as_deref(), Some("nopic"));
         assert!(m.validate().is_empty(), "{:?}", m.validate());
+    }
+
+    fn flatpak(extra: &str) -> String {
+        format!(
+            "
+id: luanti
+name: Luanti
+description: d
+category: games
+type: flatpak
+source: {{flatpak: org.luanti.luanti}}
+size_bytes: 29000000
+group: sandbox
+license: {{spdx: LGPL-2.1-or-later}}
+{extra}"
+        )
+    }
+
+    #[test]
+    fn flatpak_manifest_needs_app_id_group_and_size() {
+        assert!(parse(&flatpak("")).unwrap().validate().is_empty());
+        let bad = |from: &str, to: &str| parse(&flatpak("").replace(from, to)).unwrap().validate();
+        assert!(bad("org.luanti.luanti", "luanti")[0].contains("application id"));
+        assert!(bad("group: sandbox", "group: shooter")[0].contains("must be one of"));
+        assert!(bad("group: sandbox\n", "")[0].contains("needs a group"));
+        assert!(bad("size_bytes: 29000000\n", "")[0].contains("estimated size_bytes"));
+        assert!(
+            bad("source: {flatpak: org.luanti.luanti}", "source: {}")[0].contains("needs source.flatpak")
+        );
+        let with_url = bad(
+            "source: {flatpak: org.luanti.luanti}",
+            "source: {flatpak: org.luanti.luanti, url: 'https://e.org/a'}",
+        );
+        assert!(
+            with_url.iter().any(|e| e.contains("takes no url")),
+            "{with_url:?}"
+        );
+    }
+
+    #[test]
+    fn group_and_flatpak_source_are_only_for_flatpak_packages() {
+        let e = parse(&files("group: arcade\n")).unwrap().validate();
+        assert_eq!(e, vec!["group is only valid for type flatpak".to_string()]);
+        let e = parse(&files("").replace(
+            "source: {url: 'https://example.org/a.tar'}",
+            "source: {url: 'https://example.org/a.tar', flatpak: org.a.b}",
+        ))
+        .unwrap()
+        .validate();
+        assert_eq!(
+            e,
+            vec!["source.flatpak is only valid for type flatpak".to_string()]
+        );
     }
 
     #[test]

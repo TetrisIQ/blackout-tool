@@ -1,0 +1,12 @@
+id: aisleriot
+name: Aisleriot Solitaire
+description: More than 80 solitaire card games.
+category: games
+type: flatpak
+source:
+  flatpak: org.gnome.Aisleriot
+size_bytes: 84000000
+group: board
+license:
+  spdx: GPL-3.0-or-later
+  url: https://gitlab.gnome.org/GNOME/aisleriot/-/blob/master/COPYING

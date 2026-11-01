@@ -187,6 +187,7 @@ impl Installer for MediaInstaller {
                     moved: false,
                 }],
                 service: None,
+                app: None,
             },
         );
         state.save()?;
@@ -330,6 +331,8 @@ mod tests {
                     media: "music".into(),
                     extract: Extract::Zip,
                 }),
+                flatpak: None,
+                group: None,
             }
         }
     }
