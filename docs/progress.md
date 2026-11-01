@@ -66,3 +66,15 @@
 - **Change to Phase 4:** mirrored names now resolve to `127.77.0.1`, and the nft table redirects ports 80 and 443 for that address only, so no local dev server is hijacked. Existing Phase 4 setups: `kit net disable`, then `kit net enable --renew-ca`.
 - **Tests:** portal rendering (relative links, escaping, URL encoding), Caddyfile and nft goldens, enable/disable with the portal host; the opt-in e2e test passes with real Caddy 2.11.7 and kiwix-serve: portal page from disk, search across books through `kit.local`, http -> https redirect.
 - **Acceptance (manual, needs sudo and a browser):** `test/accept_net.sh`, then open `http://kit.local`, search a term that exists in two installed ZIMs and expect hits from both; the "one search box finds results from all installed ZIMs" criterion was only verified with a single ZIM so far.
+
+## Phase 6 - Service packages, first slice (implemented; real-host acceptance pending)
+- **Framework:** manifest blocks `service` (host, port, health path, env, mounts, provisioner) and `content` (media kind, zip/none); `container` installer (digest-pinned image, Quadlet file `kit-<id>.container`, loopback-only port, health wait, first-run provisioning), `files` media installer (atomic zip unpack, zip-slip and size guards); `kit install` now installs packages that need no download; `kit status` shows services and their login; Caddy vhost and portal tile per service; the CA/hosts/leaf include service hosts.
+- **Packages:** `navidrome` (GPL-3.0, image `deluan/navidrome:0.64.2` by digest, mounts `/music` read-only from `<data>/media/music`) and `music_musopen_dvd` (Musopen DVD, 2.4 GB zip, 145 MP3 files, Public Domain Mark; sha256 computed from a full download and the SHA-1 matches archive.org's metadata).
+- **Verified for real, without touching the host's config:** Navidrome 0.64.2 run with `podman run` and the manifest's environment (`/ping` 200, `createAdmin` 200 then 403, scanner schedule applied); Podman's own `quadlet -dryrun` accepts the generated file (`tests/quadlet.rs`); the real Musopen zip unpacks through `kit install --select music_musopen_dvd` in a temp data dir in 15 s with the checksum verified. The test image was removed again.
+- **Tests:** 14 new unit tests for the installers, one CLI round trip (install, status with login, no-op re-run, uninstall), manifest validation, Caddy golden for services.
+- **Acceptance (manual, `test/accept_services.sh`):** install both packages for real, `kit net enable --renew-ca`, open `https://navidrome.kit.local`, log in, play a track offline. Not done: this writes `kit-navidrome.service` into the user's systemd.
+
+### Caveats
+- The Musopen zip contains macOS `__MACOSX/` and `.DS_Store` files; Navidrome should ignore them but this is unverified.
+- The licence of the pack is the Public Domain Mark claimed on archive.org for Musopen's own release; a human legal review is still open (roadmap risk).
+- Audiobookshelf, Jellyfin and Kavita/Calibre-Web, further content packs (LibriVox, Blender Open Movies, Standard Ebooks, games) and the linger hint are the next slices.

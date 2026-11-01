@@ -1,0 +1,14 @@
+id: music_musopen_dvd
+name: Musopen DVD (classical music, public domain)
+description: Classical recordings released by the Musopen non-profit into the public domain (about 2.4 GB zip, MP3).
+category: music
+type: files
+source:
+  url: https://archive.org/download/musopen-dvd/Musopen-DVD.zip
+sha256: 3a4fd9a3c8e7364574baa3c7459007e9fd9481c64213785ebe18eea204f1266c
+size_bytes: 2414587816
+license:
+  spdx: LicenseRef-Public-Domain-Mark-1.0
+  url: https://creativecommons.org/publicdomain/mark/1.0/
+  attribution: Musopen (www.musopen.org), Kickstarter-funded recordings
+content: {media: music, extract: zip}

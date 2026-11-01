@@ -264,3 +264,32 @@ A fixed list (`EMERGENCY_SEARCHES`: first aid, resuscitation, drinking water, bl
 
 ## P5-5. Mirror address 127.77.0.1 instead of 127.0.0.1 (change to Phase 4)
 Adding a redirect for port 80 would have hijacked any local web server on `localhost:80`. The hosts block now maps the names to `127.77.0.1` (all of 127.0.0.0/8 is loopback) and the nftables table redirects 80 and 443 for that address only. Caddy still listens on `127.0.0.1:8443/8444`.
+
+---
+
+# Phase 6 - Service packages (first slice: framework, Navidrome, one music pack)
+
+Started on the owner's instruction while the Phase 4/5 browser acceptance was still pending. Owner's choices: Podman Quadlet, one host name per service under `kit.local`, first slice = framework + Navidrome + free music; Audiobookshelf, Jellyfin and Kavita/Calibre-Web follow as further manifests on the same framework.
+
+## P6-1. Manifest: `service` and `content`
+- `type: container` needs `source.image` pinned by digest (`repo[:tag]@sha256:...`; validation rejects anything else, the digest is the checksum, rule 7) and a `service` block: `host` (under `kit.local`), `port` (same inside and on 127.0.0.1), `health_path`, `env`, `mounts` (`data` = the service's own directory, `media` = `<data>/media/<kind>` shared with content packs, optionally read-only), `provision`.
+- `type: files` with a `content` block (`media` kind, `extract: zip|none`) is a content pack: it lands in `<data>/media/<kind>/<id>/`. Kinds: music, audiobooks, video, books, games.
+
+## P6-2. Quadlet, rootless, loopback only
+`kit install` writes `~/.config/containers/systemd/kit-<id>.container` (first line = marker; a file without it is never touched), `daemon-reload`, `systemctl --user start kit-<id>.service`, waits for the health path. `PublishPort=127.0.0.1:<port>:<port>`, so nothing is reachable from outside until Phase 9 decides it. `podman pull` by digest is the only step that needs the internet; after that the image lives in Podman's local storage.
+Tests: golden/behaviour tests with fakes, plus `tests/quadlet.rs` which feeds the shipped manifests to Podman's real generator (`quadlet -dryrun`, nothing installed).
+
+## P6-3. Provisioning without a wizard
+`provision: navidrome` creates the first admin through Navidrome's own `POST /auth/createAdmin` (verified against 0.64.2: 200 the first time, 403 "Cannot create another first admin" afterwards), with a random 24-hex password written to `<data>/services/<id>/credentials.json` (mode 0600) only after the call succeeded. `kit status` prints the login; `--purge` deletes it. If an admin already exists kit says so and does not invent credentials. Trade-off: the password is readable by the user who owns the data directory, which is the same trust boundary as the service data itself.
+
+## P6-4. Front and portal
+Each service gets its own Caddy site (`https://navidrome.kit.local`, apps do not like sub-paths) proxying to its loopback port; hosts, leaf certificate and the CA's name constraint include it. The portal lists services as tiles. Existing CAs from before this phase do not permit the new host names: `kit net enable --renew-ca`.
+
+## P6-5. Content packs are unpacked, not copied twice
+Zips are unpacked into a temporary directory and renamed into place (no half-unpacked pack after a crash), `enclosed_name` rejects zip-slip, a 200 GB cap bounds zip bombs. A pack record is kept in the same state file; `library_files()` now only returns ZIMs, so packs never end up in the Kiwix library.
+
+## P6 decisions found while implementing
+1. **`kit install` installs packages without a download** (containers). Tools are checked per package type up front (`podman` for containers, the Kiwix tools only if ZIMs are involved or installed).
+2. **Updating an image** is a manifest change (new digest): the next `kit install` sees the recorded image differs, pulls, rewrites the Quadlet file and restarts the unit. The old image is not pruned automatically.
+3. **No linger hint yet** for container services (the Kiwix hint covers the same `loginctl enable-linger` need).
+4. **Legal status of content:** each pack states its licence; items hosted on archive.org carry an uploader-claimed licence, so only a source with a trustworthy provenance is shipped (Musopen, see progress notes). The roadmap's "legal check of each entertainment source" remains open for every further pack.
