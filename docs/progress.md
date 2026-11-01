@@ -105,3 +105,6 @@
 - Image digests are those of the tags as pulled on amd64; `size_bytes` of the images are estimates.
 - Blender's films are CC-BY 3.0; the attribution is in the manifest. The legal review of all content sources is still open.
 - Not verified: HTTPS front (`kit net enable --renew-ca`) with Jellyfin's and Kavita's websockets, playback in a browser.
+
+## Test profile
+`catalog/profiles/test.yaml` (`kit plan --profile test`, `kit install --profile test`): all four services plus one small pack each, two small ZIMs (Arch Wiki, Wikivoyage) for the cross-library search. 4.3 GB in total, of which Musopen is 2.4 GB (the only free music pack so far).

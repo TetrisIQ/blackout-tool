@@ -1,0 +1,15 @@
+id: test
+name: Test
+description: Every service with a minimal amount of content, for trying the kit end to end. About 4.3 GB.
+budget_bytes: 6000000000
+packages:
+  - archwiki_en
+  - wikivoyage_en_nopic
+  - navidrome
+  - music_musopen_dvd
+  - audiobookshelf
+  - librivox_alice
+  - jellyfin
+  - blender_big_buck_bunny
+  - kavita
+  - standardebooks_alice
