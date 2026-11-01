@@ -1,0 +1,14 @@
+id: standardebooks_alice
+name: Alice's Adventures in Wonderland (Standard Ebooks, illustrated)
+description: Lewis Carroll's classic with John Tenniel's illustrations as a carefully produced EPUB (about 18 MB).
+category: books
+type: files
+source:
+  url: https://standardebooks.org/ebooks/lewis-carroll/alices-adventures-in-wonderland/john-tenniel/downloads/lewis-carroll_alices-adventures-in-wonderland_john-tenniel.epub?source=download
+sha256: 431719c25bcb0b6a67fc03938b4633723d775324ac2c62a06a04f98862148bef
+size_bytes: 18398869
+license:
+  spdx: CC0-1.0
+  url: https://standardebooks.org/about/standard-ebooks-and-copyright
+  attribution: Standard Ebooks; text by Lewis Carroll (died 1898), illustrations by John Tenniel (died 1914)
+content: {media: books, extract: none}

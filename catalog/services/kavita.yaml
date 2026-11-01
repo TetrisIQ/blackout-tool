@@ -1,0 +1,19 @@
+id: kavita
+name: Kavita (ebooks)
+description: Reads the installed ebook packs (EPUB, PDF) in any browser, remembers your place, no internet needed.
+category: services
+type: container
+source:
+  image: 'ghcr.io/kareadita/kavita:0.9.1@sha256:c3ccdc5b4d935cd3a50cfc3776a0cfa3d55e04abbf77015e0c31156f72347123'
+size_bytes: 250000000
+license:
+  spdx: GPL-3.0-only
+  url: https://github.com/Kareadita/Kavita/blob/develop/LICENSE
+service:
+  host: kavita.kit.local
+  port: 5000
+  health_path: /api/health
+  provision: kavita
+  mounts:
+    - {kind: data, target: /kavita/config}
+    - {kind: media, media: books, target: /books, read_only: true}

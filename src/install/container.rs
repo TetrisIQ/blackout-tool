@@ -204,6 +204,7 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                 hint.push_str("; could not log in to add the library, add it in the web interface");
                 return Ok(Some(hint));
             };
+            let auth = format!("Bearer {token}");
             for m in svc.mounts.iter().filter(|m| m.kind == MountKind::Media) {
                 let media = m.media.as_deref().unwrap_or("media");
                 let name = media[..1].to_uppercase() + &media[1..];
@@ -214,7 +215,7 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                 });
                 match ctx
                     .probe
-                    .post_json_bearer(&url(svc, "/api/libraries"), &lib.to_string(), &token)
+                    .post_json_auth(&url(svc, "/api/libraries"), &lib.to_string(), &auth)
                 {
                     Ok(reply) => {
                         // The folder watcher only sees changes made after the library exists.
@@ -223,12 +224,154 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                             .and_then(|v| v["id"].as_str().map(str::to_string))
                         {
                             let scan = url(svc, &format!("/api/libraries/{lib_id}/scan"));
-                            if let Err(e) = ctx.probe.post_json_bearer(&scan, "{}", &token) {
+                            if let Err(e) = ctx.probe.post_json_auth(&scan, "{}", &auth) {
                                 hint.push_str(&format!("; could not scan the {name} library ({e})"));
                             }
                         }
                     }
                     Err(e) => hint.push_str(&format!("; could not add the {name} library ({e})")),
+                }
+            }
+            Ok(Some(hint))
+        }
+        "jellyfin" => {
+            if ctx.paths.credentials_file(id).exists() {
+                return Ok(None);
+            }
+            let creds = Credentials {
+                username: "admin".into(),
+                password: random_hex(12)?,
+            };
+            // The setup wizard, answered with the defaults for an offline machine.
+            let wizard: [(&str, serde_json::Value); 3] = [
+                (
+                    "/Startup/Configuration",
+                    serde_json::json!({"UICulture": "en-US", "MetadataCountryCode": "US", "PreferredMetadataLanguage": "en"}),
+                ),
+                (
+                    "/Startup/User",
+                    serde_json::json!({"Name": creds.username, "Password": creds.password}),
+                ),
+                ("/Startup/Complete", serde_json::json!({})),
+            ];
+            for (path, body) in wizard {
+                if let Err(e) = ctx.probe.post_json(&url(svc, path), &body.to_string()) {
+                    // The wizard refuses its steps once it has been completed.
+                    return Ok(Some(format!(
+                        "{id}: could not create the first login automatically ({e}); open https://{} and create it there",
+                        svc.host
+                    )));
+                }
+            }
+            write_private(
+                &ctx.paths.credentials_file(id),
+                &(serde_json::to_string_pretty(&creds).unwrap_or_default() + "\n"),
+            )?;
+            let mut hint = format!(
+                "{id}: created the login '{}'; `kit status` shows the password",
+                creds.username
+            );
+            const CLIENT: &str = r#"MediaBrowser Client="kit", Device="kit", DeviceId="kit", Version="1""#;
+            let login = serde_json::json!({"Username": creds.username, "Pw": creds.password});
+            let token = ctx
+                .probe
+                .post_json_auth(&url(svc, "/Users/AuthenticateByName"), &login.to_string(), CLIENT)
+                .ok()
+                .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+                .and_then(|v| v["AccessToken"].as_str().map(str::to_string));
+            let Some(token) = token else {
+                hint.push_str("; could not log in to add the library, add it in the web interface");
+                return Ok(Some(hint));
+            };
+            let auth = format!(r#"{CLIENT}, Token="{token}""#);
+            for m in svc.mounts.iter().filter(|m| m.kind == MountKind::Media) {
+                let media = m.media.as_deref().unwrap_or("media");
+                let name = media[..1].to_uppercase() + &media[1..];
+                // No internet lookups; the library is scanned right away (`refreshLibrary`).
+                let options = serde_json::json!({"LibraryOptions": {
+                    "PathInfos": [{"Path": m.target}],
+                    "EnableInternetProviders": false,
+                    "MetadataSavers": [],
+                }});
+                let query =
+                    format!("/Library/VirtualFolders?name={name}&collectionType=movies&refreshLibrary=true");
+                if let Err(e) = ctx
+                    .probe
+                    .post_json_auth(&url(svc, &query), &options.to_string(), &auth)
+                {
+                    hint.push_str(&format!("; could not add the {name} library ({e})"));
+                }
+            }
+            Ok(Some(hint))
+        }
+        "kavita" => {
+            if ctx.paths.credentials_file(id).exists() {
+                return Ok(None);
+            }
+            let creds = Credentials {
+                username: "admin".into(),
+                password: random_hex(12)?,
+            };
+            let body = serde_json::json!({
+                "username": creds.username,
+                "password": creds.password,
+                "email": "admin@kit.local",
+            });
+            // Registration is only open while no user exists; it returns a token for that user.
+            let token = match ctx
+                .probe
+                .post_json(&url(svc, "/api/Account/register"), &body.to_string())
+            {
+                Ok(r) => serde_json::from_str::<serde_json::Value>(&r)
+                    .ok()
+                    .and_then(|v| v["token"].as_str().map(str::to_string)),
+                Err(e) => {
+                    return Ok(Some(format!(
+                        "{id}: could not create the first login automatically ({e}); open https://{} and create it there",
+                        svc.host
+                    )));
+                }
+            };
+            write_private(
+                &ctx.paths.credentials_file(id),
+                &(serde_json::to_string_pretty(&creds).unwrap_or_default() + "\n"),
+            )?;
+            let mut hint = format!(
+                "{id}: created the login '{}'; `kit status` shows the password",
+                creds.username
+            );
+            let Some(token) = token else {
+                hint.push_str("; could not log in to add the library, add it in the web interface");
+                return Ok(Some(hint));
+            };
+            let auth = format!("Bearer {token}");
+            for m in svc.mounts.iter().filter(|m| m.kind == MountKind::Media) {
+                let media = m.media.as_deref().unwrap_or("media");
+                let name = media[..1].to_uppercase() + &media[1..];
+                // Type 2 is "Book" (epub/pdf). Kavita rejects a library without these fields, and
+                // scans it as part of creating it.
+                let lib = serde_json::json!({
+                    "name": name,
+                    "type": 2,
+                    "folders": [m.target],
+                    "folderWatching": true,
+                    "includeInDashboard": true,
+                    "includeInRecommended": true,
+                    "includeInSearch": true,
+                    "manageCollections": true,
+                    "manageReadingLists": true,
+                    "allowScrobbling": false,
+                    "allowMetadataMatching": false,
+                    "enableMetadata": true,
+                    "fileGroupTypes": [1, 2, 3, 4],
+                    "excludePatterns": [],
+                    "metadataProvider": 2,
+                });
+                if let Err(e) =
+                    ctx.probe
+                        .post_json_auth(&url(svc, "/api/Library/create"), &lib.to_string(), &auth)
+                {
+                    hint.push_str(&format!("; could not add the {name} library ({e})"));
                 }
             }
             Ok(Some(hint))
@@ -814,7 +957,87 @@ mod tests {
             posted[2].1.contains("\"fullPath\":\"/audiobooks\"")
                 && posted[2].1.contains("\"name\":\"Audiobooks\"")
         );
-        assert_eq!(*probe.bearers.lock().unwrap(), ["tok123", "tok123"]);
+        assert_eq!(*probe.auths.lock().unwrap(), ["Bearer tok123", "Bearer tok123"]);
+    }
+
+    fn media_service(e: &Env, id: &str, port: u16, health: &str, media: &str, target: &str) -> InstallInput {
+        let mut input = e.input();
+        input.id = id.into();
+        let svc = input.service.as_mut().unwrap();
+        svc.port = port;
+        svc.health_path = health.into();
+        svc.provision = Some(id.into());
+        svc.mounts = vec![Mount {
+            kind: MountKind::Media,
+            media: Some(media.into()),
+            target: target.into(),
+            read_only: true,
+        }];
+        input
+    }
+
+    #[test]
+    fn jellyfin_runs_the_wizard_and_adds_a_video_library() {
+        let e = Env::new();
+        let runner = host();
+        let input = media_service(&e, "jellyfin", 8096, "/health", "video", "/media");
+        let mut probe = FakeHttp::default().with("http://127.0.0.1:8096/health", "Healthy");
+        probe.post_replies.insert(
+            "http://127.0.0.1:8096/Users/AuthenticateByName".into(),
+            r#"{"AccessToken":"tok9"}"#.into(),
+        );
+        let ctx = e.ctx(&runner, &probe);
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        ContainerInstaller.install(&input, &ctx, &mut guard).unwrap();
+
+        let posted = probe.posted.lock().unwrap();
+        let urls: Vec<&str> = posted.iter().map(|p| p.0.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "http://127.0.0.1:8096/Startup/Configuration",
+                "http://127.0.0.1:8096/Startup/User",
+                "http://127.0.0.1:8096/Startup/Complete",
+                "http://127.0.0.1:8096/Users/AuthenticateByName",
+                "http://127.0.0.1:8096/Library/VirtualFolders?name=Video&collectionType=movies&refreshLibrary=true",
+            ]
+        );
+        let creds = read_credentials(&e.paths, "jellyfin").unwrap();
+        assert!(posted[1].1.contains(&creds.password) && posted[3].1.contains(&creds.password));
+        assert!(
+            posted[4].1.contains("\"Path\":\"/media\"")
+                && posted[4].1.contains("\"EnableInternetProviders\":false")
+        );
+        let auths = probe.auths.lock().unwrap();
+        assert!(!auths[0].contains("Token="));
+        assert!(auths[1].ends_with("Token=\"tok9\""));
+    }
+
+    #[test]
+    fn kavita_registers_the_first_user_and_adds_a_book_library() {
+        let e = Env::new();
+        let runner = host();
+        let input = media_service(&e, "kavita", 5000, "/api/health", "books", "/books");
+        let mut probe = FakeHttp::default().with("http://127.0.0.1:5000/api/health", "Ok");
+        probe.post_replies.insert(
+            "http://127.0.0.1:5000/api/Account/register".into(),
+            r#"{"token":"kt1"}"#.into(),
+        );
+        let ctx = e.ctx(&runner, &probe);
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        ContainerInstaller.install(&input, &ctx, &mut guard).unwrap();
+
+        let posted = probe.posted.lock().unwrap();
+        let urls: Vec<&str> = posted.iter().map(|p| p.0.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "http://127.0.0.1:5000/api/Account/register",
+                "http://127.0.0.1:5000/api/Library/create"
+            ]
+        );
+        assert!(posted[1].1.contains("\"folders\":[\"/books\"]") && posted[1].1.contains("\"type\":2"));
+        assert_eq!(*probe.auths.lock().unwrap(), ["Bearer kt1"]);
     }
 
     #[test]

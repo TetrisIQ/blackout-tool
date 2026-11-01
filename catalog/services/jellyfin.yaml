@@ -1,0 +1,24 @@
+id: jellyfin
+name: Jellyfin (films and series)
+description: Plays the installed video packs in any browser or TV app, remembers where you stopped, no internet needed.
+category: services
+type: container
+source:
+  image: 'docker.io/jellyfin/jellyfin:12.4.20261026-211555@sha256:7da5184caa38c553f219f6772476540081f392a68049e2b68c923f6daf877f8e'
+size_bytes: 700000000
+license:
+  spdx: GPL-2.0-only
+  url: https://github.com/jellyfin/jellyfin/blob/master/LICENSE
+service:
+  host: jellyfin.kit.local
+  port: 8096
+  health_path: /health
+  provision: jellyfin
+  env:
+    JELLYFIN_CONFIG_DIR: /config/config
+    JELLYFIN_DATA_DIR: /config/data
+    JELLYFIN_CACHE_DIR: /config/cache
+    JELLYFIN_LOG_DIR: /config/log
+  mounts:
+    - {kind: data, target: /config}
+    - {kind: media, media: video, target: /media, read_only: true}

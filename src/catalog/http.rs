@@ -29,8 +29,9 @@ pub trait Http {
         })
     }
 
-    /// Like [`Http::post_json`] with a bearer token (second step of first-run provisioning).
-    fn post_json_bearer(&self, url: &str, _body: &str, _bearer: &str) -> Result<String, HttpError> {
+    /// Like [`Http::post_json`] with a complete `Authorization` header value (`Bearer ...`,
+    /// `MediaBrowser Token=...`), for the later steps of first-run provisioning.
+    fn post_json_auth(&self, url: &str, _body: &str, _authorization: &str) -> Result<String, HttpError> {
         Err(HttpError::Request {
             url: url.to_string(),
             message: "POST is not supported by this client".into(),
@@ -60,14 +61,14 @@ impl Default for UreqHttp {
 }
 
 impl UreqHttp {
-    fn post(&self, url: &str, body: &str, bearer: Option<&str>) -> Result<String, HttpError> {
+    fn post(&self, url: &str, body: &str, authorization: Option<&str>) -> Result<String, HttpError> {
         let fail = |e: ureq::Error| HttpError::Request {
             url: url.to_string(),
             message: e.to_string(),
         };
         let mut req = self.agent.post(url).header("Content-Type", "application/json");
-        if let Some(t) = bearer {
-            req = req.header("Authorization", format!("Bearer {t}"));
+        if let Some(a) = authorization {
+            req = req.header("Authorization", a);
         }
         let mut resp = req.send(body).map_err(fail)?;
         resp.body_mut().read_to_string().map_err(fail)
@@ -88,8 +89,8 @@ impl Http for UreqHttp {
         self.post(url, body, None)
     }
 
-    fn post_json_bearer(&self, url: &str, body: &str, bearer: &str) -> Result<String, HttpError> {
-        self.post(url, body, Some(bearer))
+    fn post_json_auth(&self, url: &str, body: &str, authorization: &str) -> Result<String, HttpError> {
+        self.post(url, body, Some(authorization))
     }
 }
 
@@ -224,8 +225,8 @@ pub(crate) mod testing {
         pub post_fails: bool,
         /// Canned POST responses by URL (default `{}`).
         pub post_replies: HashMap<String, String>,
-        /// Bearer tokens seen, in order.
-        pub bearers: std::sync::Mutex<Vec<String>>,
+        /// `Authorization` header values seen, in order.
+        pub auths: std::sync::Mutex<Vec<String>>,
     }
 
     impl FakeHttp {
@@ -261,8 +262,8 @@ pub(crate) mod testing {
             Ok(self.post_replies.get(url).cloned().unwrap_or_else(|| "{}".into()))
         }
 
-        fn post_json_bearer(&self, url: &str, body: &str, bearer: &str) -> Result<String, HttpError> {
-            self.bearers.lock().unwrap().push(bearer.into());
+        fn post_json_auth(&self, url: &str, body: &str, authorization: &str) -> Result<String, HttpError> {
+            self.auths.lock().unwrap().push(authorization.into());
             self.post_json(url, body)
         }
     }

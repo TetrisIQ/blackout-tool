@@ -129,7 +129,7 @@ pub struct ContentSpec {
     pub extract: Extract,
 }
 
-pub const PROVISIONERS: &[&str] = &["navidrome", "audiobookshelf"];
+pub const PROVISIONERS: &[&str] = &["navidrome", "audiobookshelf", "jellyfin", "kavita"];
 pub const MEDIA_KINDS: &[&str] = &["music", "audiobooks", "video", "books", "games"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

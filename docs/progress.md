@@ -90,3 +90,18 @@
 ### Caveats
 - The public-domain status of LibriVox recordings (and of the source texts in every jurisdiction) needs a human legal review before shipping more titles.
 - `size_bytes` of the image (160 MB) is an estimate for the disk-space plan.
+
+## Phase 6 - third slice: Jellyfin + Kavita (implemented; real-host acceptance pending)
+- **Packages:** `jellyfin` (GPL-2.0-only, `jellyfin/jellyfin:12.4.20261026-211555` by digest, port 8096) with `blender_big_buck_bunny` (480p, CC-BY-3.0, 249 MB, sha256 from a full download); `kavita` (GPL-3.0-only, `kareadita/kavita:0.9.1` by digest, port 5000) with `standardebooks_alice` (Standard Ebooks EPUB, CC0, 18 MB, sha256 from a full download).
+- **Provisioners:** Jellyfin: the setup wizard (`/Startup/*`), login with a `MediaBrowser` authorization header, `POST /Library/VirtualFolders` with internet metadata providers off and `refreshLibrary=true`. Kavita: `/api/Account/register` (open while no user exists, returns the token), `POST /api/Library/create` (type 2 = book; the scan starts on its own).
+- **Framework change:** `Http::post_json_auth` takes a whole `Authorization` value (replaces `post_json_bearer`); Jellyfin rejects `Bearer`.
+- **Verified for real (podman, temp dirs, no host config):** both images with the exact API calls the provisioners make: Jellyfin lists "Big Buck Bunny" about 10 s after library creation; Kavita lists the Alice series. `kit install --select standardebooks_alice` unpacks to `media/books/`. Images and containers were removed again.
+- **Findings from the real images:** Kavita rejects a library without `fileGroupTypes`, `excludePatterns` and `metadataProvider`, and ignores files unless `enableMetadata` is true ("metadata turned off", then "Unable to parse"). Jellyfin ignores `Authorization: Bearer`.
+- **Tests:** 227 unit tests (new: both provisioners), `shipped_catalog_is_valid`, Quadlet dry run.
+
+### Caveats
+- Kavita names the series after the Standard Ebooks collection ("The Guardian's 100 Greatest Novels"), not the book title; the book is searchable by title.
+- The Standard Ebooks download URL is unversioned: a new release of the book changes the file and the checksum check fails until the manifest is updated.
+- Image digests are those of the tags as pulled on amd64; `size_bytes` of the images are estimates.
+- Blender's films are CC-BY 3.0; the attribution is in the manifest. The legal review of all content sources is still open.
+- Not verified: HTTPS front (`kit net enable --renew-ca`) with Jellyfin's and Kavita's websockets, playback in a browser.

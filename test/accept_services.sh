@@ -1,17 +1,17 @@
 #!/bin/sh
-# Manual Phase 6 acceptance (first slice): Navidrome with a free music pack, Audiobookshelf with a LibriVox book. Needs podman, systemd
+# Manual Phase 6 acceptance (first slice): Navidrome with a free music pack, Audiobookshelf with a LibriVox book, Jellyfin with Big Buck Bunny, Kavita with an ebook. Needs podman, systemd
 # user services, and the Phase 4 front (caddy, sudo) for the HTTPS names. The pack is ~2.4 GB.
-# Undo: kit uninstall music_musopen_dvd navidrome librivox_alice audiobookshelf --purge ; kit net enable (refresh) or disable.
+# Undo: kit uninstall music_musopen_dvd navidrome librivox_alice audiobookshelf blender_big_buck_bunny jellyfin standardebooks_alice kavita --purge ; kit net enable (refresh) or disable.
 set -eu
 KIT="${KIT:-cargo run --release --quiet --}"
 
 step() { printf '\n== %s\n' "$*"; }
 
 step "1. dry run"
-$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice --dry-run
+$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice,jellyfin,blender_big_buck_bunny,kavita,standardebooks_alice --dry-run
 
 step "2. install (pulls the image by digest, downloads and unpacks the pack, creates the login)"
-$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice
+$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice,jellyfin,blender_big_buck_bunny,kavita,standardebooks_alice
 $KIT status
 $KIT verify
 
@@ -27,5 +27,8 @@ cat <<MSG
    with the network cable unplugged.
  - Open https://audiobookshelf.kit.local, log in, "Alice in Wonderland" is in the Audiobooks library
    and plays.
- - Open https://kit.local: both services are listed as tiles.
+ - Open https://jellyfin.kit.local, log in, "Big Buck Bunny" is in the Video library and plays.
+ - Open https://kavita.kit.local, log in, the Alice ebook is in the Books library and opens
+   (the series is named after the Standard Ebooks collection, "The Guardian's 100 Greatest Novels").
+ - Open https://kit.local: all four services are listed as tiles.
 MSG
