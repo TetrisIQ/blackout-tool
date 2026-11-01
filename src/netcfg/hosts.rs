@@ -1,6 +1,9 @@
 //! The marked block in `/etc/hosts`. Only text between the two marker lines is ever touched,
 //! so everything else in the file (and its order) is preserved, and removal is exact.
 
+/// The mirrored names resolve to this loopback address (all of 127.0.0.0/8 is local), not to
+/// 127.0.0.1, so the 80/443 redirect cannot catch a development server on localhost.
+pub const MIRROR_ADDR: &str = "127.77.0.1";
 pub const BEGIN: &str = "# BEGIN kit (emergency-kit) - managed block, remove with: kit net disable";
 pub const END: &str = "# END kit (emergency-kit)";
 
@@ -10,7 +13,7 @@ pub fn render_block(hosts: &[String]) -> String {
     sorted.dedup();
     let mut s = format!("{BEGIN}\n");
     for h in sorted {
-        s.push_str(&format!("127.0.0.1 {h}\n"));
+        s.push_str(&format!("{MIRROR_ADDR} {h}\n"));
     }
     s.push_str(END);
     s.push('\n');
@@ -62,7 +65,7 @@ pub fn current(text: &str) -> Vec<String> {
     };
     text[b..e]
         .lines()
-        .filter_map(|l| l.strip_prefix("127.0.0.1 "))
+        .filter_map(|l| l.strip_prefix(format!("{MIRROR_ADDR} ").as_str()))
         .map(|h| h.trim().to_string())
         .collect()
 }

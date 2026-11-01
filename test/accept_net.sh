@@ -28,6 +28,8 @@ cat <<MSG
  - Unplug the network cable / turn Wi-Fi off.
  - Open in Firefox (and Chromium if installed):  https://de.wikipedia.org/wiki/Berlin
    (for wikivoyage_en_nopic: https://en.wikivoyage.org/wiki/Berlin)
+ - Also open http://kit.local (redirects to https), search for a term, click an emergency shortcut.
+   With two ZIMs installed (e.g. also wiktionary_en_nopic) one search must list hits from both.
  - Expected: page loads, padlock shown, no certificate warning; 50 clicked links work.
 MSG
 printf '\nPress Enter when done to undo everything (kit net disable) ... '

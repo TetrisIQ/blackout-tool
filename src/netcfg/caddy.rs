@@ -24,7 +24,17 @@ pub struct CaddySpec<'a> {
     pub cert: PathBuf,
     pub key: PathBuf,
     pub listen_port: u16,
+    /// Plain-HTTP port that only redirects the portal host to HTTPS (port 80 is redirected to it).
+    pub http_port: u16,
     pub kiwix_port: u16,
+    /// Where `kit.html` lives; served at `https://<portal_host>/`.
+    pub portal_dir: PathBuf,
+    pub portal_host: String,
+}
+
+/// The portal's plain-HTTP port next to the HTTPS one.
+pub fn http_port_for(listen_port: u16) -> u16 {
+    listen_port.checked_add(1).unwrap_or(listen_port - 1)
 }
 
 fn page(title: &str, body: &str) -> String {
@@ -110,6 +120,46 @@ fn quote(p: &std::path::Path) -> String {
     format!("\"{}\"", s(p).replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+fn portal_site(spec: &CaddySpec) -> String {
+    let host = &spec.portal_host;
+    let upstream = format!("127.0.0.1:{}", spec.kiwix_port);
+    let proxy = format!(
+        "reverse_proxy {upstream} {{\n\
+         \t\t\theader_up Host {upstream}\n\
+         \t\t\theader_down Location ^http://[^/]+/ https://{{host}}/\n\
+         \t\t}}"
+    );
+    let mut out = format!(
+        "http://{host}:{http} {{\n\
+         \tredir https://{host}{{uri}} 308\n\
+         }}\n\
+         \n\
+         https://{host}:{https} {{\n\
+         \ttls {cert} {key}\n\
+         \n",
+        http = spec.http_port,
+        https = spec.listen_port,
+        cert = quote(&spec.cert),
+        key = quote(&spec.key),
+    );
+    // The same Kiwix endpoints as on the mirrored hosts: search across all books, content, skin.
+    for path in ["/content/*", "/search*", "/skin/*", "/suggest*", "/catalog/*"] {
+        out.push_str(&format!("\thandle {path} {{\n\t\t{proxy}\n\t}}\n"));
+    }
+    out.push_str(&format!(
+        "\n\thandle {{\n\
+         \t\troot * {}\n\
+         \t\t@front path /\n\
+         \t\trewrite @front /{}\n\
+         \t\tfile_server\n\
+         \t}}\n\
+         }}\n",
+        quote(&spec.portal_dir),
+        crate::install::portal::FRONT_PAGE,
+    ));
+    out
+}
+
 pub fn render_caddyfile(spec: &CaddySpec) -> String {
     let mut out = format!(
         "{MARKER}\n\
@@ -129,6 +179,8 @@ pub fn render_caddyfile(spec: &CaddySpec) -> String {
         out.push('\n');
         out.push_str(&site(&group, spec));
     }
+    out.push('\n');
+    out.push_str(&portal_site(spec));
     out
 }
 
@@ -181,7 +233,10 @@ mod tests {
             cert: "/d/net/ca/leaf.pem".into(),
             key: "/d/net/ca/leaf.key".into(),
             listen_port: 8443,
+            http_port: 8444,
             kiwix_port: 6589,
+            portal_dir: "/d/portal".into(),
+            portal_host: "kit.local".into(),
         }
     }
 
@@ -202,8 +257,20 @@ mod tests {
         assert_eq!(
             c.matches("tls \"/d/net/ca/leaf.pem\" \"/d/net/ca/leaf.key\"")
                 .count(),
-            2
+            3,
+            "two mirror sites plus the portal"
         );
+    }
+
+    #[test]
+    fn portal_is_served_from_files_with_search_proxied() {
+        let c = render_caddyfile(&spec(&mirrors()));
+        assert!(c.contains("http://kit.local:8444 {\n\tredir https://kit.local{uri} 308"));
+        assert!(c.contains("https://kit.local:8443 {"));
+        assert!(c.contains("handle /search* {"));
+        assert!(c.contains("root * \"/d/portal\"") && c.contains("rewrite @front /kit.html"));
+        assert_eq!(http_port_for(8443), 8444);
+        assert_eq!(http_port_for(65535), 65534);
     }
 
     #[test]

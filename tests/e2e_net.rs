@@ -7,6 +7,7 @@
 //! Needs `kiwix-manage`, `kiwix-serve` and `caddy` on PATH.
 
 use std::fs;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -86,7 +87,14 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
 
     // CA, leaf and Caddyfile exactly as `kit net enable` makes them.
     let ca_dir = root.join("ca");
-    let hosts = vec![HOST.to_string()];
+    let hosts = vec![HOST.to_string(), "kit.local".to_string()];
+    let portal = root.join("portal");
+    fs::create_dir_all(&portal).unwrap();
+    fs::write(
+        portal.join("kit.html"),
+        "<html><body>PORTAL-MARKER <a href=\"/search?pattern=a\">s</a></body></html>",
+    )
+    .unwrap();
     let ca = Ca::create(&ca_dir, &hosts, NOW).unwrap();
     ca.ensure_leaf(&hosts, NOW).unwrap();
     let listen_port = free_port();
@@ -102,7 +110,10 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
             cert: ca.files.leaf_cert(),
             key: ca.files.leaf_key(),
             listen_port,
+            http_port: listen_port + 1,
             kiwix_port,
+            portal_dir: portal.clone(),
+            portal_host: "kit.local".into(),
         }),
     )
     .unwrap();
@@ -157,6 +168,36 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
 
     // Other hosts cannot be reached at all.
     assert!(client.get("https://example.com/").is_err());
+
+    // The portal answers on its own name: page from disk, search across all books through Kiwix.
+    let front = client.get("https://kit.local/").unwrap();
+    assert_eq!(
+        (front.status, front.body.contains("PORTAL-MARKER")),
+        (200, true),
+        "{}",
+        front.body
+    );
+    let all = client.get("https://kit.local/search?pattern=a").unwrap();
+    assert_eq!(all.status, 200);
+    assert!(
+        all.body.contains("/content/"),
+        "search results link into the books"
+    );
+    // Plain http on the portal host only redirects to https.
+    let mut plain = TcpStream::connect(("127.0.0.1", listen_port + 1)).unwrap();
+    plain
+        .write_all(b"GET /search?pattern=x HTTP/1.0\r\nHost: kit.local\r\n\r\n")
+        .unwrap();
+    let mut reply = String::new();
+    plain.read_to_string(&mut reply).unwrap();
+    assert!(
+        reply.starts_with("HTTP/1.0 308") || reply.starts_with("HTTP/1.1 308"),
+        "{reply}"
+    );
+    assert!(
+        reply.contains("ocation: https://kit.local/search?pattern=x"),
+        "{reply}"
+    );
 
     // The link checker finds no leaks on the real book.
     let report = check(&client, &hosts, HOST, 15, 7);

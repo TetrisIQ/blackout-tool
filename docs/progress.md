@@ -60,3 +60,9 @@
 - The Caddyfile was validated against Caddy 2.11.7 via `tests/e2e_net.rs` (first run fixed the search rewrite: `uri query >a b` is not valid, kit now sets `pattern` from `{query.search}` and drops `search`).
 - Chromium is not installed here; only Firefox/`~/.pki/nssdb` can be verified. Flatpak/Snap browsers keep their own store and are not covered.
 - The 443 redirect is gone after a reboot (`kit net enable` restores it).
+
+## Phase 5 - Portal and unified search (implemented; acceptance together with Phase 4 pending)
+- **Portal:** `https://kit.local` with a search box over all installed libraries (kiwix-serve's cross-book `/search`), emergency quick searches (EN/DE), emergency numbers and a tile per installed package; `http://kit.local` redirects to HTTPS. Pages are generated from the state into `<data>/portal/` (`index.html` for files, `kit.html` for the front).
+- **Change to Phase 4:** mirrored names now resolve to `127.77.0.1`, and the nft table redirects ports 80 and 443 for that address only, so no local dev server is hijacked. Existing Phase 4 setups: `kit net disable`, then `kit net enable --renew-ca`.
+- **Tests:** portal rendering (relative links, escaping, URL encoding), Caddyfile and nft goldens, enable/disable with the portal host; the opt-in e2e test passes with real Caddy 2.11.7 and kiwix-serve: portal page from disk, search across books through `kit.local`, http -> https redirect.
+- **Acceptance (manual, needs sudo and a browser):** `test/accept_net.sh`, then open `http://kit.local`, search a term that exists in two installed ZIMs and expect hits from both; the "one search box finds results from all installed ZIMs" criterion was only verified with a single ZIM so far.

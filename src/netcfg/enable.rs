@@ -14,6 +14,7 @@ use super::caddy::{self, CaddySpec, Mirror};
 use super::trust::{self, SystemStore};
 use super::{NetError, NetPaths, hosts, io_err, nft};
 use crate::install::Check;
+use crate::install::portal::PORTAL_HOST;
 use crate::install::runner::CommandRunner;
 use crate::install::tools::{find_in_path, s};
 
@@ -225,8 +226,11 @@ fn caddy_hint() -> String {
 
 /// Brings the network layer in line with `desired`. With `dry_run` nothing is changed.
 pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Step>, NetError> {
-    let hosts_list = desired.hosts();
-    if hosts_list.is_empty() {
+    let mut hosts_list = desired.hosts();
+    let have_mirrors = !hosts_list.is_empty();
+    hosts_list.push(PORTAL_HOST.to_string());
+    hosts_list.sort();
+    if !have_mirrors {
         return Err(NetError::Invalid(
             "no installed package mirrors a domain; install one first, e.g. `kit install --select wikipedia_de_nopic`".into(),
         ));
@@ -284,6 +288,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     // 1. CA and server certificate (own files only).
     let mut permitted = desired.permitted.clone();
     permitted.extend(hosts_list.iter().cloned());
+    permitted.push(PORTAL_HOST.to_string());
     steps.go(
         &format!(
             "{} the local CA in {} (name-constrained to {} mirrored hosts)",
@@ -328,7 +333,10 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
                 cert: files.leaf_cert(),
                 key: files.leaf_key(),
                 listen_port: ctx.listen_port,
+                http_port: caddy::http_port_for(ctx.listen_port),
                 kiwix_port: ctx.kiwix_port,
+                portal_dir: ctx.data_dir.join("portal"),
+                portal_host: PORTAL_HOST.to_string(),
             });
             caddy_changed |= write_if_changed(&caddyfile, &text)?;
             // Never start Caddy with a config it rejects.
@@ -432,7 +440,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     if new_hosts != hosts_text {
         steps.go(
             &format!(
-                "add the marked block to {} (127.0.0.1 for each mirrored host)",
+                "add the marked block to {} (127.77.0.1 for each mirrored host and {PORTAL_HOST})",
                 ctx.hosts_path.display()
             ),
             Some("/etc/hosts belongs to root"),
@@ -447,16 +455,22 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     }
     steps.go(
         &format!(
-            "redirect 127.0.0.1:{} to :{} (nftables table `{} {}`)",
+            "redirect {}:{} and :{} to :{} / :{} (nftables table `{} {}`)",
+            hosts::MIRROR_ADDR,
             nft::HTTPS_PORT,
+            nft::HTTP_PORT,
             ctx.listen_port,
+            caddy::http_port_for(ctx.listen_port),
             nft::FAMILY,
             nft::TABLE
         ),
         Some("binding or redirecting port 443 needs root"),
         || {
             let file = paths.dir.join("kit_net.nft");
-            write_if_changed(&file, &nft::ruleset(ctx.listen_port))?;
+            write_if_changed(
+                &file,
+                &nft::ruleset(ctx.listen_port, caddy::http_port_for(ctx.listen_port)),
+            )?;
             run_ok(ctx.root, &nft_bin, &["-f", s(&file)])?;
             Ok(Some(
                 "not kept across a reboot; run `kit net enable` again after boot".into(),
@@ -626,7 +640,11 @@ pub fn status(ctx: &NetCtx) -> Vec<Check> {
         add("net", false, "not enabled (run `kit net enable`)".into());
         return checks;
     };
-    add("hosts", true, format!("{} mirrored hosts", state.hosts.len()));
+    add(
+        "hosts",
+        true,
+        format!("{} hosts incl. {PORTAL_HOST}", state.hosts.len()),
+    );
 
     match Ca::load(&paths.ca_dir()) {
         Ok(Some(ca)) => {
@@ -864,7 +882,7 @@ mod tests {
                 .contains("caddy")
         );
         let hosts = std::fs::read_to_string(&e.hosts).unwrap();
-        assert!(hosts.starts_with(HOSTS) && hosts.contains("127.0.0.1 de.wikipedia.org"));
+        assert!(hosts.starts_with(HOSTS) && hosts.contains("127.77.0.1 de.wikipedia.org"));
         // The CA may issue for the whole catalog, the certificate only for what is installed.
         assert!(
             std::fs::read_to_string(net.join("ca/permitted.txt"))
