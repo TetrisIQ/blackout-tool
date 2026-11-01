@@ -596,6 +596,10 @@ impl Installer for ContainerInstaller {
         if let Some(kind) = &svc.provision {
             notes.extend(provision(kind, &input.id, ctx, &svc)?);
         }
+        notes.extend(super::reconcile::linger_note(
+            ctx,
+            &format!("The {} service", input.id),
+        ));
         notes.push(format!(
             "{}: https://{} (after `kit net enable`), directly http://127.0.0.1:{}/",
             input.id, svc.host, svc.port
@@ -1177,6 +1181,33 @@ mod tests {
         );
         assert!(posted[1].1.contains("\"folders\":[\"/books\"]") && posted[1].1.contains("\"type\":2"));
         assert_eq!(*probe.auths.lock().unwrap(), ["Bearer kt1"]);
+    }
+
+    #[test]
+    fn linger_hint_is_given_for_services_that_would_stop_at_logout() {
+        let e = Env::new();
+        use super::super::runner::CommandRunner;
+        fake_exe(&e.bin, "loginctl");
+        let base = host();
+        let runner = FakeRunner::new(move |prog, args| {
+            if prog == "loginctl" {
+                return Ok(CmdOutput {
+                    success: true,
+                    stdout: "Linger=no\n".into(),
+                    stderr: String::new(),
+                });
+            }
+            base.run(prog, args)
+        });
+        let probe = probe();
+        let mut ctx = e.ctx(&runner, &probe);
+        ctx.user = Some("tester".into());
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        let notes = ContainerInstaller.install(&e.input(), &ctx, &mut guard).unwrap();
+        assert!(
+            notes.iter().any(|n| n.contains("enable-linger tester")),
+            "{notes:?}"
+        );
     }
 
     #[test]

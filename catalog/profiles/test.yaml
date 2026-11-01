@@ -1,12 +1,13 @@
 id: test
 name: Test
-description: Every service with a minimal amount of content, for trying the kit end to end. About 4.3 GB.
-budget_bytes: 6000000000
+description: Every service with a minimal amount of content, for trying the kit end to end. About 2 GB.
+budget_bytes: 4000000000
 packages:
   - archwiki_en
   - wikivoyage_en_nopic
   - navidrome
-  - music_musopen_dvd
+  - music_macleod_local_forecast
+  - music_macleod_sneaky_snitch
   - audiobookshelf
   - librivox_alice
   - jellyfin

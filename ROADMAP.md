@@ -76,6 +76,11 @@ A Linux tool that downloads and installs a curated set of offline knowledge and 
 - Auto-provision libraries and first-run setup (no wizard needed offline).
 - **Done when:** after install, each service shows its sample content without further manual setup.
 
+### Phase 6b — Games (split off from Phase 6)
+- Free games: Luanti, OpenTTD, FreeCiv, 0 A.D. These are local programs, not container services: a new package type (distro package or Flatpak, installed per user where possible), a license per game, a launcher entry and a tile on the portal.
+- Content such as OpenTTD base graphics (OpenGFX) only if its license allows redistribution.
+- **Done when:** after install, each game starts from the portal's list or the desktop menu and runs offline; uninstall removes it again.
+
 ### Phase 7 — Maps, AI, tools
 - Maps: Organic Maps/OsmAnd data for region selection; optional PMTiles viewer; optional routing and geocoding as "heavy" packages.
 - LLM: evaluate `survival-llm`; run via Ollama or llama.cpp; hardware check (RAM/GPU) recommends model size; Whisper and Argos/LibreTranslate as optional packs.

@@ -187,8 +187,30 @@ pub fn is_safe_file_name(name: &str) -> bool {
 /// Last path segment of a URL, if it is usable as a file name.
 pub fn file_name_from_url(url: &str) -> Option<String> {
     let no_query = url.split(['?', '#']).next()?;
-    let name = no_query.rsplit('/').next()?;
-    is_safe_file_name(name).then(|| name.to_string())
+    let name = percent_decode(no_query.rsplit('/').next()?);
+    is_safe_file_name(&name).then_some(name)
+}
+
+/// `%20` -> ` `. Anything that does not decode to UTF-8 is kept as written; a decoded `/` is
+/// refused later by [`is_safe_file_name`].
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok());
+        match (bytes[i], hex.and_then(|h| u8::from_str_radix(h, 16).ok())) {
+            (b'%', Some(b)) => {
+                out.push(b);
+                i += 3;
+            }
+            (c, _) => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 /// Bytes still to be fetched for `target`, crediting a finished file or a resumable partial one.
@@ -224,6 +246,11 @@ mod tests {
             file_name_from_url("https://x.org/a.zim?x=1#f").as_deref(),
             Some("a.zim")
         );
+        assert_eq!(
+            file_name_from_url("https://x.org/a%20b%C3%A4.mp3").as_deref(),
+            Some("a bä.mp3")
+        );
+        assert_eq!(file_name_from_url("https://x.org/..%2Fevil"), None);
         assert_eq!(file_name_from_url("https://x.org/dir/"), None);
         assert_eq!(file_name_from_url("https://x.org/.hidden"), None);
         assert_eq!(file_name_from_url("https://x.org/a.part"), None);

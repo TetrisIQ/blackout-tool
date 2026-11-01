@@ -120,3 +120,11 @@ Found by the first real install of the test profile: no login, no library.
 ## Fix: Jellyfin library stayed empty after provisioning
 - **Cause (from the Jellyfin log of a real install):** `Startup/Complete` makes Jellyfin validate its still empty library ("Validating media library"). The scan that `refreshLibrary=true` starts while the library is created runs at the same moment and is dropped, so the film never appeared until a manual scan. A fresh container in four parallel runs could not reproduce it; it depends on timing.
 - **Fix:** after creating the library, kit asks for a scan (`POST /Library/Refresh`) and checks `/Items` until a film is listed (up to 10 tries, 3 s apart; only when a video pack is installed), and says so if it never shows. `Http::get_auth` was added for the check.
+
+## Phase 6 - fourth slice: more content, linger hint, test profile
+- **Linger hint:** container services print `sudo loginctl enable-linger <user>` when linger is off (shared helper with the Kiwix service).
+- **New packs:** `blender_tears_of_steel` (CC-BY-3.0, 372 MB) and `blender_sintel` (CC-BY-3.0, 674 MB) for Jellyfin; `music_macleod_local_forecast` and `music_macleod_sneaky_snitch` (Kevin MacLeod, CC-BY-4.0, 5-8 MB each, from the artist's own site) for Navidrome. All checksums from full downloads.
+- **Test profile** now uses the two MacLeod tracks instead of the 2.4 GB Musopen pack: 1.9 GB in total.
+- **Download file names** are percent-decoded (`%20` -> space); a decoded `/` is still refused.
+- **Not done, on purpose:** Internet Archive films and Jamendo/FMA. IA items carry licence claims set by the uploaders (the "free" Kevin MacLeod items there say BY-ND or nothing), and the one Chaplin short checked had no video file. Jamendo needs an API key and FMA has no bulk download. These need a human legal review and a vetted list before they ship.
+- **Phase 6b (games)** is now its own phase in `ROADMAP.md`.

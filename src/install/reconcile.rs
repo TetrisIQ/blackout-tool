@@ -171,19 +171,23 @@ pub fn reconcile(ctx: &Ctx, state: &State) -> Result<Vec<String>, InstallError> 
     }
     wait_active(ctx, sysctl)?;
 
-    if let (Some(user), Some(loginctl)) = (
-        &ctx.user,
-        super::tools::find_in_path("loginctl", &ctx.search_path),
-    ) && let Ok(out) = ctx
+    notes.extend(linger_note(ctx, "The content server"));
+    Ok(notes)
+}
+
+/// Hint for user services that stop at logout and do not start at boot (`Linger=no`).
+pub(super) fn linger_note(ctx: &Ctx, what: &str) -> Option<String> {
+    let user = ctx.user.as_ref()?;
+    let loginctl = super::tools::find_in_path("loginctl", &ctx.search_path)?;
+    let out = ctx
         .runner
         .run(s(&loginctl), &["show-user", user, "--property=Linger"])
-        && out.stdout.contains("Linger=no")
-    {
-        notes.push(format!(
-            "The content server stops when you log out and does not start at boot. To keep it running: sudo loginctl enable-linger {user}"
-        ));
-    }
-    Ok(notes)
+        .ok()?;
+    out.stdout.contains("Linger=no").then(|| {
+        format!(
+            "{what} stops when you log out and does not start at boot. To keep it running: sudo loginctl enable-linger {user}"
+        )
+    })
 }
 
 /// Nothing installed: stop and remove our unit and the library file.

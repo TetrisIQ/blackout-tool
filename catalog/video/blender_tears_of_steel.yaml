@@ -1,0 +1,14 @@
+id: blender_tears_of_steel
+name: Tears of Steel (Blender open movie, 720p)
+description: The Blender Foundation's live-action sci-fi short with visual effects, 720p (about 372 MB).
+category: video
+type: files
+source:
+  url: https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov
+sha256: efa9062d9cdb7a338e40ad530dfdf234806743f29ae6a1a136b97ece4e588e8f
+size_bytes: 372178639
+license:
+  spdx: CC-BY-3.0
+  url: https://creativecommons.org/licenses/by/3.0/
+  attribution: (CC) Blender Foundation | mango.blender.org
+content: {media: video, extract: none}
