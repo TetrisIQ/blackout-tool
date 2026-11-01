@@ -1,0 +1,12 @@
+id: devdocs_html
+name: HTML reference (DevDocs)
+description: HTML elements and attributes (MDN).
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_html, lang: eng}
+license:
+  spdx: CC-BY-SA-2.5
+  url: https://creativecommons.org/licenses/by-sa/2.5/
+  attribution: Mozilla contributors, via DevDocs
+languages: [en]

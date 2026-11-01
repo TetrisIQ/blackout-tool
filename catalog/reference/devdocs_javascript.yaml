@@ -1,0 +1,12 @@
+id: devdocs_javascript
+name: JavaScript reference (DevDocs)
+description: JavaScript language and built-ins (MDN).
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_javascript, lang: eng}
+license:
+  spdx: CC-BY-SA-2.5
+  url: https://creativecommons.org/licenses/by-sa/2.5/
+  attribution: Mozilla contributors, via DevDocs
+languages: [en]

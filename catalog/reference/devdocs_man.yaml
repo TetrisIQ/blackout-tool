@@ -1,0 +1,12 @@
+id: devdocs_man
+name: Linux man pages (DevDocs)
+description: Linux manual pages in searchable form.
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_man, lang: eng}
+license:
+  spdx: Linux-man-pages-copyleft
+  url: https://www.kernel.org/doc/man-pages/licenses.html
+  attribution: Linux man-pages project contributors, via DevDocs
+languages: [en]

@@ -1,0 +1,12 @@
+id: devdocs_css
+name: CSS reference (DevDocs)
+description: CSS properties and selectors (MDN).
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_css, lang: eng}
+license:
+  spdx: CC-BY-SA-2.5
+  url: https://creativecommons.org/licenses/by-sa/2.5/
+  attribution: Mozilla contributors, via DevDocs
+languages: [en]

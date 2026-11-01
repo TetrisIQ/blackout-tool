@@ -1,0 +1,12 @@
+id: devdocs_python
+name: Python documentation (DevDocs)
+description: Python language and standard library reference.
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_python, lang: eng}
+license:
+  spdx: PSF-2.0
+  url: https://docs.python.org/3/license.html
+  attribution: Python Software Foundation, via DevDocs
+languages: [en]

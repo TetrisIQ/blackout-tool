@@ -144,3 +144,9 @@ Found by the first real install of the test profile: no login, no library.
 - That OpenTTD's Flathub build bundles OpenGFX/OpenSFX/OpenMSX comes from Flathub's description and was not started here. Not tried: actually starting a game (no display in this session).
 - Not pinned to a commit: a game updates when Flathub does and the user runs `flatpak update`. Distro packages are not supported, only Flatpak.
 - Licence strings are taken from Flathub's appstream data; the legal review of content sources stays open.
+
+## Phase 7 - first slice: tech documentation (DevDocs ZIMs)
+- **New packs** in `catalog/reference/`: `devdocs_man`, `_bash`, `_git`, `_python`, `_rust`, `_html`, `_css`, `_javascript`, `_c` (Kiwix `devdocs_en_*`, plain `zim` packages, sizes from the live catalog; 51 MB together). Added to `standard` and `full`.
+- **Checked:** `kit plan --profile standard` resolves all nine against the live catalog; 239 unit tests and `shipped_catalog_is_valid` pass.
+- **Caveats:** the DevDocs ZIMs are tagged `_ftindex:no`, so the unified search (Phase 5) finds them by title only. Licences are those of the upstream documentation (man pages are a mix, `Linux-man-pages-copyleft` is the project's umbrella); the DevDocs ZIMs were not opened to confirm per-page notices.
+- **Still open in Phase 7:** maps, local LLM (`survival-llm` evaluation, hardware check), Whisper/translation packs, optional apt/pip mirror subset. The "done when" criterion is not met yet.

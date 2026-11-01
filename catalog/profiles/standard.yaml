@@ -12,6 +12,15 @@ packages:
   - archwiki_en
   - askubuntu_en
   - superuser_en
+  - devdocs_man
+  - devdocs_bash
+  - devdocs_git
+  - devdocs_python
+  - devdocs_rust
+  - devdocs_html
+  - devdocs_css
+  - devdocs_javascript
+  - devdocs_c
   - luanti
   - openttd
   - freeciv
