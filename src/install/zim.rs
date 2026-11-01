@@ -143,6 +143,7 @@ impl Installer for ZimInstaller {
                 service: None,
                 app: None,
                 map: None,
+                model: None,
             },
         );
         state.port = Some(ctx.port);
@@ -289,6 +290,7 @@ mod tests {
                 flatpak: None,
                 group: None,
                 map: None,
+                ollama: None,
             }
         }
 
@@ -799,12 +801,18 @@ mod tests {
 
     #[test]
     fn unsupported_types_are_rejected() {
-        for t in [PackageType::Zim, PackageType::Files, PackageType::Container] {
+        for t in [
+            PackageType::Zim,
+            PackageType::Files,
+            PackageType::Container,
+            PackageType::Model,
+        ] {
             assert!(super::super::installer_for(t).is_ok());
         }
-        for t in [PackageType::Apt, PackageType::Model] {
-            let e = super::super::installer_for(t).err().unwrap().to_string();
-            assert!(e.contains("cannot be installed yet"), "{e}");
-        }
+        let e = super::super::installer_for(PackageType::Apt)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(e.contains("cannot be installed yet"), "{e}");
     }
 }

@@ -55,6 +55,23 @@ pub struct KiwixRef {
     pub lang: Option<String>,
 }
 
+/// A model in the Ollama registry. Size, layer digests and licence are read live from there.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct OllamaRef {
+    /// Library name, e.g. `granite4.2`.
+    pub model: String,
+    /// Tag, e.g. `3b`.
+    pub tag: String,
+}
+
+impl OllamaRef {
+    /// The name `ollama pull` and `ollama list` use.
+    pub fn name(&self) -> String {
+        format!("{}:{}", self.model, self.tag)
+    }
+}
+
 /// A map region: a bounding box cut out of the newest Protomaps build.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -101,6 +118,9 @@ pub struct Source {
     /// Flatpak application id on Flathub (type `flatpak`), e.g. `org.luanti.luanti`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flatpak: Option<String>,
+    /// Model of a `model` package (Ollama registry, `library/` namespace).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ollama: Option<OllamaRef>,
     /// Region of a `map` package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<MapRef>,
@@ -423,9 +443,34 @@ impl Manifest {
                     ));
                 }
             }
+        } else if self.kind == PackageType::Model {
+            match &s.ollama {
+                Some(o) => {
+                    let name_ok = |v: &str| {
+                        !v.is_empty()
+                            && v.bytes()
+                                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+                    };
+                    if !name_ok(&o.model) || !name_ok(&o.tag) {
+                        errs.push("source.ollama needs a model and a tag like granite4.2 / 3b".into());
+                    }
+                }
+                None => errs.push("type model needs source.ollama".into()),
+            }
+            for (field, present) in [
+                ("source.url", s.url.is_some()),
+                ("sha256", self.sha256.is_some()),
+                ("size_bytes", self.size_bytes.is_some()),
+            ] {
+                if present {
+                    errs.push(format!(
+                        "{field} must not be set together with source.ollama (read live from the Ollama registry)"
+                    ));
+                }
+            }
         } else {
             match self.kind {
-                PackageType::Zim | PackageType::Files | PackageType::Model => {
+                PackageType::Zim | PackageType::Files => {
                     if s.url.is_none() {
                         errs.push(format!(
                             "type {} needs source.url (or source.kiwix for zim)",
@@ -445,6 +490,7 @@ impl Manifest {
                     )),
                     None => errs.push("type flatpak needs source.flatpak".into()),
                 },
+                PackageType::Model => unreachable!("handled above"),
                 PackageType::Map => match &s.map {
                     Some(m) => errs.extend(m.problems()),
                     None => errs.push("type map needs source.map (bbox and maxzoom)".into()),
@@ -487,6 +533,9 @@ impl Manifest {
             }
         }
 
+        if s.ollama.is_some() && self.kind != PackageType::Model {
+            errs.push("source.ollama is only valid for type model".into());
+        }
         if s.map.is_some() && self.kind != PackageType::Map {
             errs.push("source.map is only valid for type map".into());
         }
@@ -863,6 +912,34 @@ license: {{spdx: ODbL-1.0}}
                 .validate()
                 .iter()
                 .any(|e| e.contains("only valid for type map"))
+        );
+    }
+
+    #[test]
+    fn model_manifest_rules() {
+        let base = "id: m\nname: M\ndescription: d\ncategory: ai\ntype: model\nlicense: {spdx: Apache-2.0}\n";
+        let ok = parse(&format!(
+            "{base}source: {{ollama: {{model: granite4.2, tag: 3b}}}}"
+        ))
+        .unwrap();
+        assert!(ok.validate().is_empty(), "{:?}", ok.validate());
+        assert_eq!(ok.source.ollama.as_ref().unwrap().name(), "granite4.2:3b");
+        let none = parse(&format!("{base}source: {{}}")).unwrap();
+        assert!(none.validate().iter().any(|e| e.contains("needs source.ollama")));
+        let bad = parse(&format!(
+            "{base}source: {{ollama: {{model: 'Granite 4', tag: ''}}}}"
+        ))
+        .unwrap();
+        assert!(bad.validate().iter().any(|e| e.contains("model and a tag")));
+        let sized = parse(&format!(
+            "{base}size_bytes: 5\nsource: {{ollama: {{model: a, tag: b}}}}"
+        ))
+        .unwrap();
+        assert!(
+            sized
+                .validate()
+                .iter()
+                .any(|e| e.contains("read live from the Ollama registry"))
         );
     }
 }

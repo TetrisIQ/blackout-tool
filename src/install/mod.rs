@@ -6,6 +6,7 @@ pub mod container;
 pub mod flatpak;
 pub mod map;
 pub mod media;
+pub mod model;
 pub mod portal;
 pub mod reconcile;
 pub mod runner;
@@ -178,6 +179,8 @@ pub struct InstallInput {
     pub group: Option<String>,
     /// `map` packages: the region to cut out.
     pub map: Option<crate::catalog::manifest::MapRef>,
+    /// `model` packages: the Ollama model and the size the registry reported.
+    pub ollama: Option<crate::catalog::manifest::OllamaRef>,
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +219,7 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Files => Ok(Box::new(media::MediaInstaller)),
         PackageType::Flatpak => Ok(Box::new(flatpak::FlatpakInstaller)),
         PackageType::Map => Ok(Box::new(map::MapInstaller)),
+        PackageType::Model => Ok(Box::new(model::ModelInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",
             other.as_str()

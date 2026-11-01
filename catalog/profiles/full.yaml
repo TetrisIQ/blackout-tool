@@ -37,3 +37,4 @@ packages:
   - gnome_chess
   - aisleriot
   - map_germany
+  - llm_granite_3b

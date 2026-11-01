@@ -513,6 +513,9 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
     if let Some(a) = &m.source.flatpak {
         writeln!(out, "  flatpak:    {a} (Flathub)")?;
     }
+    if let Some(o) = &m.source.ollama {
+        writeln!(out, "  model:      {} (Ollama registry)", o.name())?;
+    }
     if let Some(r) = &m.source.map {
         writeln!(
             out,
@@ -838,6 +841,9 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
     if item.kind == crate::catalog::PackageType::Flatpak {
         return r.app.is_some();
     }
+    if item.kind == crate::catalog::PackageType::Model {
+        return r.model.is_some();
+    }
     if item.kind == crate::catalog::PackageType::Map {
         // The region comes from whichever build was newest at install time; it is kept until
         // the user reinstalls (updates are Phase 10).
@@ -868,6 +874,7 @@ fn install_input(
         flatpak: manifest.source.flatpak.clone(),
         group: manifest.group.clone(),
         map: manifest.source.map.clone(),
+        ollama: manifest.source.ollama.clone(),
     }
 }
 
@@ -879,6 +886,9 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
     }
     if kinds.contains(&T::Flatpak) {
         tools::require("flatpak", &ctx.search_path)?;
+    }
+    if kinds.contains(&T::Model) {
+        tools::require("ollama", &ctx.search_path)?;
     }
     if kinds.contains(&T::Map) {
         tools::require("pmtiles", &ctx.search_path)?;

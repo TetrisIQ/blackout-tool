@@ -1,0 +1,12 @@
+id: llm_granite_3b
+name: Granite 4.2 3B (local assistant)
+description: Small, fast language model (2.2 GB, 128K context, tool use) that runs through a standard Ollama, also on a CPU. It can be wrong; check first-aid answers against the library.
+category: ai
+type: model
+source:
+  ollama: {model: granite4.2, tag: 3b}
+license:
+  spdx: Apache-2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution: IBM
+languages: [en, de]

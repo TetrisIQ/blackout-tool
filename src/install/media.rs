@@ -189,6 +189,7 @@ impl Installer for MediaInstaller {
                 service: None,
                 app: None,
                 map: None,
+                model: None,
             },
         );
         state.save()?;
@@ -335,6 +336,7 @@ mod tests {
                 flatpak: None,
                 group: None,
                 map: None,
+                ollama: None,
             }
         }
     }

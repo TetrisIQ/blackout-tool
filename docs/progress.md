@@ -163,3 +163,17 @@ Found by the first real install of the test profile: no login, no library.
 - **Not run for real:** `pmtiles extract` against a live build, and the viewer in a browser (including range requests through Caddy, symlinks, label fonts). Needs `pmtiles`, caddy and a browser.
 - **The viewer shows no search/routing**, only panning, zoom, region switch and the browser's geolocation.
 - Still open in Phase 7: local LLM (`survival-llm` is a desktop app around Ollama with its own library, not a model; plan is Ollama/llama.cpp as a service plus Kiwix search), hardware check, Whisper/translation, apt/pip mirror subset.
+
+## Phase 7 - third slice: first local model (Granite 4.2 3B through Ollama)
+- **Scope on purpose small:** one model, no automatic choice yet. `granite4.2:3b` is the smallest candidate that is not a toy: 2.2 GB, 128K context, tool use, Apache-2.0 (licence text read from the registry's licence layer).
+- **New package type use `model`** (`source.ollama: {model, tag}`, no `url`/`sha256`/`size_bytes`): `LiveResolver` reads `registry.ollama.ai/v2/library/<model>/manifests/<tag>` for the exact size (config + layers); the version shown is the first 12 hex of the weights layer. Same idea as the Kiwix catalog (rule 5).
+- **Installer** `install::model` uses a standard Ollama and does not install or run it: needs `ollama` on PATH and a server on `127.0.0.1:11434` (clear errors with the start commands otherwise), then `ollama pull <name>`; Ollama checks every layer's SHA-256 against the registry manifest (rule 7, like Flatpak). Records `ModelRecord {name, size, by_kit}`; a model that was already there is never removed (`by_kit: false`); uninstall runs `ollama rm` only for kit's own pulls. Idempotent.
+- **Catalog:** `llm_granite_3b` in `test`, `standard` and `full`. `kit plan --profile test` resolves it live (2.2 GB).
+- **Tests:** 275 pass, lint clean (new: manifest rules, registry resolver, installer against a fake Ollama server that reflects pulls/removals).
+- **Try it:** start Ollama, `kit install --select llm_granite_3b`, then `ollama run granite4.2:3b`.
+
+### Caveats
+- **Not run against a real Ollama** (none installed here). The pull itself, `kit verify` and `kit uninstall` are covered by fakes only.
+- `ollama pull` output is captured, so a 2.2 GB pull shows no progress bar in `kit install`.
+- **Safety:** Survival LLM's own evaluation found Granite 4.2 3B gave harmful first-aid answers (5 of 22). It is a speed-first starting point, not a recommendation; the evaluation gate and grounding in the Kiwix library (plan slices 5 and 6) come before it ships in a profile as the default. Meanwhile it is in `standard` and `full` so it can be tested.
+- Not done yet from the plan: `kit hw` detection, automatic model choice, thinking model, chat page, engine tarball fallback.

@@ -49,6 +49,10 @@ pub fn require(name: &str, dirs: &[PathBuf]) -> Result<PathBuf, InstallError> {
                 "Install it with: {}",
                 install_hint(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
             )
+        } else if name == "ollama" {
+            "Install Ollama from your distribution or from https://ollama.com/download and start it \
+             (`ollama serve`)."
+                .to_string()
         } else if name == "pmtiles" {
             "Get the go-pmtiles release for your system from \
              https://github.com/protomaps/go-pmtiles/releases and put `pmtiles` on PATH."

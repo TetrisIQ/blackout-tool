@@ -167,6 +167,7 @@ impl Installer for MapInstaller {
                     bbox: m.bbox,
                     maxzoom: m.maxzoom,
                 }),
+                model: None,
             },
         );
         state.save()?;
@@ -310,6 +311,7 @@ mod tests {
                 bbox: [5.86, 47.27, 15.04, 55.06],
                 maxzoom: 12,
             }),
+            ollama: None,
         }
     }
 

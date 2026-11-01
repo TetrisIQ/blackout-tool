@@ -63,6 +63,17 @@ pub struct MapRecord {
     pub maxzoom: u8,
 }
 
+/// A language model held by Ollama.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelRecord {
+    /// The name Ollama knows it by, e.g. `granite4.2:3b`.
+    pub name: String,
+    pub size: u64,
+    /// kit pulled it, so kit removes it again. A model that was there before stays.
+    pub by_kit: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
@@ -81,11 +92,13 @@ pub struct Record {
     pub app: Option<AppRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<MapRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelRecord>,
 }
 
 impl Record {
     pub fn size_bytes(&self) -> u64 {
-        self.files.iter().map(|f| f.size).sum()
+        self.files.iter().map(|f| f.size).sum::<u64>() + self.model.as_ref().map_or(0, |m| m.size)
     }
 }
 
@@ -239,6 +252,7 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
         service: None,
         app: None,
         map: None,
+        model: None,
     }
 }
 
