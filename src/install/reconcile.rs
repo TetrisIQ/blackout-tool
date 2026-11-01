@@ -10,14 +10,14 @@ use super::service::{self, UNIT_NAME, UnitSpec};
 use super::tools::{require, s};
 use super::{Check, Ctx, InstallError, io_err, portal, state::State};
 
-fn cmd_failed(what: &str, stderr: &str) -> InstallError {
+pub(super) fn cmd_failed(what: &str, stderr: &str) -> InstallError {
     InstallError::Command {
         command: what.to_string(),
         stderr: stderr.trim().to_string(),
     }
 }
 
-fn write_if_changed(path: &Path, content: &str) -> Result<bool, InstallError> {
+pub(super) fn write_if_changed(path: &Path, content: &str) -> Result<bool, InstallError> {
     if fs::read_to_string(path).ok().as_deref() == Some(content) {
         return Ok(false);
     }
@@ -31,7 +31,11 @@ fn write_if_changed(path: &Path, content: &str) -> Result<bool, InstallError> {
     Ok(true)
 }
 
-fn systemctl(ctx: &Ctx, tool: &str, args: &[&str]) -> Result<super::runner::CmdOutput, InstallError> {
+pub(super) fn systemctl(
+    ctx: &Ctx,
+    tool: &str,
+    args: &[&str],
+) -> Result<super::runner::CmdOutput, InstallError> {
     let mut full = vec!["--user"];
     full.extend_from_slice(args);
     ctx.runner
@@ -68,7 +72,7 @@ fn rebuild_library(ctx: &Ctx, kiwix_manage: &str, zims: &[String]) -> Result<boo
     Ok(true)
 }
 
-fn ensure_port_free(port: u16) -> Result<(), InstallError> {
+pub(super) fn ensure_port_free(port: u16) -> Result<(), InstallError> {
     TcpListener::bind(("127.0.0.1", port))
         .map(drop)
         .map_err(|_| InstallError::PortInUse(port))

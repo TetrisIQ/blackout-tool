@@ -235,6 +235,8 @@ pub struct Env<'a> {
     pub probe: &'a dyn Http,
     /// Directory for systemd user units.
     pub unit_dir: PathBuf,
+    /// Directory for Podman Quadlet files.
+    pub quadlet_dir: PathBuf,
     /// Where to look for `kiwix-serve`, `systemctl`, ...
     pub search_path: Vec<PathBuf>,
     pub user: Option<String>,
@@ -291,6 +293,7 @@ pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<Outcome> {
             runner: &RealRunner,
             probe: &UreqHttp::default(),
             unit_dir: unit_dir()?,
+            quadlet_dir: quadlet_dir()?,
             search_path: tools::path_dirs(),
             user: std::env::var("USER").ok().filter(|u| !u.is_empty()),
             start_wait: Duration::from_secs(3),
@@ -333,6 +336,19 @@ fn xdg_dir(var: &str, home_rel: &str) -> Result<PathBuf> {
         home_rel
     };
     Ok(PathBuf::from(home).join(rel).join("kit"))
+}
+
+fn quadlet_dir() -> Result<PathBuf> {
+    let base = match std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => PathBuf::from(std::env::var_os("HOME").context("neither $HOME nor $XDG_CONFIG_HOME is set")?)
+            .join(".config"),
+    };
+    Ok(base.join("containers/systemd"))
+}
+
+pub(crate) fn paths_for(env: &Env, data_dir: PathBuf) -> Result<Paths> {
+    Ok(Paths::new(data_dir, env.unit_dir.clone())?.with_quadlet_dir(env.quadlet_dir.clone())?)
 }
 
 fn unit_dir() -> Result<PathBuf> {
@@ -792,56 +808,107 @@ fn make_ctx<'a>(env: &'a Env, paths: &Paths, port: u16) -> Ctx<'a> {
     }
 }
 
-fn is_current(state: &State, item: &plan::PlanItem) -> bool {
-    state
-        .packages
-        .get(&item.id)
-        .is_some_and(|r| r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref())
+fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog) -> bool {
+    let Some(r) = state.packages.get(&item.id) else {
+        return false;
+    };
+    if item.kind == crate::catalog::PackageType::Container {
+        let image = catalog
+            .package(&item.id)
+            .ok()
+            .and_then(|m| m.source.image.as_deref());
+        return r.service.as_ref().map(|s| s.image.as_str()) == image && image.is_some();
+    }
+    r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref()
 }
 
-fn install_input(job: &Job, verified: bool) -> InstallInput {
+fn install_input(
+    item: &plan::PlanItem,
+    job: Option<&Job>,
+    manifest: &Manifest,
+    verified: bool,
+) -> InstallInput {
     InstallInput {
-        id: job.item.id.clone(),
-        name: job.item.name.clone(),
-        license: job.item.license.clone(),
-        version: job.item.version.clone(),
-        source: job.target.final_path(),
-        file_name: job.target.name.clone(),
-        size: job.target.size,
-        sha256: job.target.sha256.clone(),
+        id: item.id.clone(),
+        name: item.name.clone(),
+        license: item.license.clone(),
+        version: item.version.clone(),
+        source: job.map(|j| j.target.final_path()).unwrap_or_default(),
+        file_name: job.map(|j| j.target.name.clone()).unwrap_or_default(),
+        size: job.map_or(0, |j| j.target.size),
+        sha256: job.map(|j| j.target.sha256.clone()).unwrap_or_default(),
         verified,
+        image: manifest.source.image.clone(),
+        service: manifest.service.clone(),
+        content: manifest.content.clone(),
     }
+}
+
+/// The programs the selected kinds of packages need (plus the ZIM tools when ZIMs are installed).
+fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: bool) -> Result<()> {
+    use crate::catalog::PackageType as T;
+    if has_zims || kinds.contains(&T::Zim) {
+        ensure_tools(ctx)?;
+    }
+    if kinds.contains(&T::Container) {
+        for t in ["podman", "systemctl"] {
+            tools::require(t, &ctx.search_path)?;
+        }
+    }
+    Ok(())
 }
 
 fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
     let selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
     let data_dir = data_dir_of(&args.data_dir)?;
-    let paths = Paths::new(data_dir.clone(), env.unit_dir.clone())?;
+    let paths = paths_for(env, data_dir.clone())?;
     // A short look at the state; the lock is only held while installing, not while downloading.
     let prior = StateGuard::open(&paths)?.state.clone();
     let port = args.port.or(prior.port).unwrap_or(DEFAULT_PORT);
     let ctx = make_ctx(env, &paths, port);
 
-    // Fail before downloading gigabytes if installing cannot work.
-    ensure_tools(&ctx)?;
     let resolver = LiveResolver::new(env.http);
     let plan = plan::build(catalog, &selection, &resolver, env.space, &data_dir)?;
     for item in &plan.items {
         installer_for(item.kind).map_err(|e| anyhow::anyhow!("{}: {e}", item.id))?;
+        if item.kind == crate::catalog::PackageType::Files && catalog.package(&item.id)?.content.is_none() {
+            bail!(
+                "{}: packages of type files without a `content` block cannot be installed yet",
+                item.id
+            );
+        }
     }
+    // Fail before downloading gigabytes if installing cannot work.
+    let kinds: Vec<_> = plan.items.iter().map(|i| i.kind).collect();
+    ensure_tools_for(&ctx, &kinds, !prior.library_files().is_empty())?;
 
-    for item in plan.items.iter().filter(|i| is_current(&prior, i)) {
+    for item in plan.items.iter().filter(|i| is_current(&prior, i, catalog)) {
         writeln!(out, "{}: already installed", item.id)?;
     }
-    let jobs = build_jobs(&plan, &paths.downloads_dir(), &|i| !is_current(&prior, i), out)?;
+    let jobs = build_jobs(
+        &plan,
+        &paths.downloads_dir(),
+        &|i| !is_current(&prior, i, catalog),
+        out,
+    )?;
+    // Everything not current gets installed, with or without a download (containers have none).
+    let todo: Vec<&plan::PlanItem> = plan
+        .items
+        .iter()
+        .filter(|i| !is_current(&prior, i, catalog))
+        .collect();
+    let input_for = |item: &plan::PlanItem, verified: bool| -> Result<InstallInput> {
+        let job = jobs.iter().find(|j| j.item.id == item.id);
+        Ok(install_input(item, job, catalog.package(&item.id)?, verified))
+    };
 
     if args.dry_run {
         let remaining: u64 = jobs.iter().map(|j| download::remaining_bytes(&j.target)).sum();
         writeln!(out, "Dry run for {}: nothing will be changed.", plan.label)?;
         writeln!(out, "  download: {} still to fetch", format_bytes(remaining))?;
-        for job in &jobs {
-            for step in installer_for(job.item.kind)?.plan(&install_input(job, false), &ctx, &prior)? {
-                writeln!(out, "  {}: {step}", job.item.id)?;
+        for item in &todo {
+            for step in installer_for(item.kind)?.plan(&input_for(item, false)?, &ctx, &prior)? {
+                writeln!(out, "  {}: {step}", item.id)?;
             }
         }
         return Ok(Outcome::Ok);
@@ -866,13 +933,13 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
 
     let mut notes = std::collections::BTreeSet::new();
     let mut guard = StateGuard::open(&paths)?;
-    for job in &jobs {
-        writeln!(out, "installing {} ...", job.item.id)?;
+    for item in &todo {
+        writeln!(out, "installing {} ...", item.id)?;
         out.flush()?;
-        let installer = installer_for(job.item.kind)?;
-        notes.extend(installer.install(&install_input(job, verified), &ctx, &mut guard)?);
+        let installer = installer_for(item.kind)?;
+        notes.extend(installer.install(&input_for(item, verified)?, &ctx, &mut guard)?);
     }
-    let any_installed = !guard.packages.is_empty();
+    let any_installed = !guard.library_files().is_empty();
     drop(guard);
     for n in &notes {
         writeln!(out, "note: {n}")?;
@@ -889,7 +956,7 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
 }
 
 fn uninstall_cmd(args: &UninstallArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
-    let paths = Paths::new(data_dir_of(&args.data_dir)?, env.unit_dir.clone())?;
+    let paths = paths_for(env, data_dir_of(&args.data_dir)?)?;
     let mut guard = StateGuard::open(&paths)?;
     let ctx = make_ctx(env, &paths, guard.port.unwrap_or(DEFAULT_PORT));
     let mut notes = std::collections::BTreeSet::new();
@@ -916,7 +983,7 @@ fn uninstall_cmd(args: &UninstallArgs, env: &Env, out: &mut dyn Write) -> Result
 }
 
 fn verify_cmd(args: &VerifyArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
-    let paths = Paths::new(data_dir_of(&args.data_dir)?, env.unit_dir.clone())?;
+    let paths = paths_for(env, data_dir_of(&args.data_dir)?)?;
     let guard = StateGuard::open(&paths)?;
     if guard.packages.is_empty() {
         writeln!(out, "Nothing is installed.")?;
@@ -961,7 +1028,7 @@ fn verify_cmd(args: &VerifyArgs, env: &Env, out: &mut dyn Write) -> Result<Outco
 }
 
 fn status_cmd(args: &StatusArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
-    let paths = Paths::new(data_dir_of(&args.data_dir)?, env.unit_dir.clone())?;
+    let paths = paths_for(env, data_dir_of(&args.data_dir)?)?;
     let guard = StateGuard::open(&paths)?;
     if guard.packages.is_empty() {
         writeln!(out, "Nothing is installed. Try: kit install --profile mini")?;
@@ -985,30 +1052,50 @@ fn status_cmd(args: &StatusArgs, env: &Env, out: &mut dyn Write) -> Result<Outco
     }
     write!(out, "{}", table(&rows, &[1]))?;
     let port = guard.port.unwrap_or(DEFAULT_PORT);
-    let active = tools::find_in_path("systemctl", &env.search_path)
-        .and_then(|t| {
-            env.runner
-                .run(
-                    tools::s(&t),
-                    &["--user", "is-active", "--quiet", install::service::UNIT_NAME],
-                )
-                .ok()
-        })
-        .is_some_and(|o| o.success);
-    writeln!(
-        out,
-        "\nContent server: {} at http://localhost:{port}/",
-        if active {
-            "running"
-        } else {
-            "NOT running (see: kit verify)"
+    let sysctl = tools::find_in_path("systemctl", &env.search_path);
+    let is_active = |unit: &str| {
+        sysctl
+            .as_ref()
+            .and_then(|t| {
+                env.runner
+                    .run(tools::s(t), &["--user", "is-active", "--quiet", unit])
+                    .ok()
+            })
+            .is_some_and(|o| o.success)
+    };
+    if !guard.library_files().is_empty() {
+        writeln!(
+            out,
+            "\nContent server: {} at http://localhost:{port}/",
+            if is_active(install::service::UNIT_NAME) {
+                "running"
+            } else {
+                "NOT running (see: kit verify)"
+            }
+        )?;
+        writeln!(
+            out,
+            "Landing page:   {}",
+            paths.portal_dir().join("index.html").display()
+        )?;
+    }
+    for (rec, sv) in guard.services() {
+        writeln!(
+            out,
+            "\nService {}: {} at https://{} (direct: http://127.0.0.1:{}/)",
+            rec.id,
+            if is_active(&sv.unit) {
+                "running"
+            } else {
+                "NOT running (see: kit verify)"
+            },
+            sv.host,
+            sv.port
+        )?;
+        if let Some(c) = install::container::read_credentials(&paths, &rec.id) {
+            writeln!(out, "  login: {} / {}", c.username, c.password)?;
         }
-    )?;
-    writeln!(
-        out,
-        "Landing page:   {}",
-        paths.portal_dir().join("index.html").display()
-    )?;
+    }
     Ok(Outcome::Ok)
 }
 
@@ -1206,6 +1293,7 @@ mod tests {
                 runner: &host.runner,
                 probe: &host.probe,
                 unit_dir: host.units.clone(),
+                quadlet_dir: host.units.join("quadlet"),
                 search_path: host.search_path.clone(),
                 user: Some("tester".into()),
                 start_wait: Duration::ZERO,
@@ -1777,6 +1865,73 @@ mod tests {
             0,
         );
         assert_eq!(r.unwrap(), Outcome::Ok, "{out}");
+    }
+
+    #[test]
+    fn container_service_installs_shows_its_login_and_uninstalls() {
+        let cat = tempfile::tempdir().unwrap();
+        write(
+            cat.path(),
+            "music.yaml",
+            "id: music\nname: Music Server\ndescription: d\ncategory: services\ntype: container\n\
+             source: {image: 'docker.io/example/music:1@sha256:0e281a87af92a798297fc671f8b37004cb7874ac051e13876b7335be96649e59'}\n\
+             size_bytes: 1000\nlicense: {spdx: GPL-3.0-only}\n\
+             service: {host: music.kit.local, port: 4533, health_path: /ping, provision: navidrome, \
+             mounts: [{kind: data, target: /data}]}\n",
+        );
+        let data = tempfile::tempdir().unwrap();
+        let dd = data.path().to_str().unwrap();
+        let (mut host, calls) = bytes_host();
+        crate::install::tools::fake_exe(&host.search_path[0], "podman");
+        host.probe = FakeHttp::default().with("http://127.0.0.1:4533/ping", "pong");
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["install", "--select", "music", "--data-dir", dd],
+            &http(),
+            u64::MAX,
+        );
+        assert_eq!(r.unwrap(), Outcome::Ok, "{out}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no download for a container");
+        assert!(
+            out.contains("installing music") && out.contains("https://music.kit.local"),
+            "{out}"
+        );
+        assert!(host.units.join("quadlet/kit-music.container").exists());
+        assert!(!out.contains("Content server"), "{out}");
+
+        let (r, out) = exec_on(&host, cat.path(), &["status", "--data-dir", dd], &http(), 0);
+        r.unwrap();
+        assert!(
+            out.contains("Service music")
+                && out.contains("https://music.kit.local")
+                && out.contains("login: admin /"),
+            "{out}"
+        );
+
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["install", "--select", "music", "--data-dir", dd],
+            &http(),
+            u64::MAX,
+        );
+        r.unwrap();
+        assert!(out.contains("music: already installed"), "{out}");
+
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["uninstall", "music", "--data-dir", dd],
+            &http(),
+            0,
+        );
+        r.unwrap();
+        assert!(
+            out.contains("uninstalled music") && out.contains("--purge"),
+            "{out}"
+        );
+        assert!(!host.units.join("quadlet/kit-music.container").exists());
     }
 
     #[test]

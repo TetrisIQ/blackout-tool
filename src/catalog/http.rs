@@ -20,6 +20,15 @@ pub enum HttpError {
 pub trait Http {
     fn get(&self, url: &str) -> Result<String, HttpError>;
 
+    /// POSTs a JSON body and returns the response body. Only needed by first-run provisioning of
+    /// services; clients that cannot do it say so.
+    fn post_json(&self, url: &str, _body: &str) -> Result<String, HttpError> {
+        Err(HttpError::Request {
+            url: url.to_string(),
+            message: "POST is not supported by this client".into(),
+        })
+    }
+
     /// URLs that were answered from an expired cache entry because the network failed.
     fn stale_urls(&self) -> Vec<String> {
         Vec::new()
@@ -49,6 +58,20 @@ impl Http for UreqHttp {
             message: e.to_string(),
         };
         let mut resp = self.agent.get(url).call().map_err(fail)?;
+        resp.body_mut().read_to_string().map_err(fail)
+    }
+
+    fn post_json(&self, url: &str, body: &str) -> Result<String, HttpError> {
+        let fail = |e: ureq::Error| HttpError::Request {
+            url: url.to_string(),
+            message: e.to_string(),
+        };
+        let mut resp = self
+            .agent
+            .post(url)
+            .header("Content-Type", "application/json")
+            .send(body)
+            .map_err(fail)?;
         resp.body_mut().read_to_string().map_err(fail)
     }
 }
@@ -179,6 +202,9 @@ pub(crate) mod testing {
         pub bodies: HashMap<String, String>,
         pub calls: AtomicUsize,
         pub fail: bool,
+        /// `(url, body)` of every POST.
+        pub posted: std::sync::Mutex<Vec<(String, String)>>,
+        pub post_fails: bool,
     }
 
     impl FakeHttp {
@@ -201,6 +227,17 @@ pub(crate) mod testing {
                 url: url.into(),
                 message: "404".into(),
             })
+        }
+
+        fn post_json(&self, url: &str, body: &str) -> Result<String, HttpError> {
+            self.posted.lock().unwrap().push((url.into(), body.into()));
+            if self.post_fails {
+                return Err(HttpError::Request {
+                    url: url.into(),
+                    message: "403".into(),
+                });
+            }
+            Ok("{}".into())
         }
     }
 }

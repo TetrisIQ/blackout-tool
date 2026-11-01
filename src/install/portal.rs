@@ -83,7 +83,24 @@ pub fn render_page(state: &State, origin: Origin) -> String {
         ),
     };
     let mut items = String::new();
-    for r in state.packages.values() {
+    for (r, sv) in state.services() {
+        let href = match origin {
+            Origin::File(_) => format!("http://127.0.0.1:{}/", sv.port),
+            Origin::Front { .. } => format!("https://{}/", esc(&sv.host)),
+        };
+        items.push_str(&format!(
+            "    <li><a href=\"{href}\"><strong>{}</strong></a> (service)<br>\
+             <small>{} · licence {} · login: run <code>kit status</code></small></li>\n",
+            esc(&r.name),
+            esc(&sv.host),
+            esc(&r.license),
+        ));
+    }
+    for r in state
+        .packages
+        .values()
+        .filter(|r| r.kind == crate::catalog::PackageType::Zim)
+    {
         let book = r
             .files
             .first()

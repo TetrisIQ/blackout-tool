@@ -70,6 +70,67 @@ pub struct Source {
     pub packages: Vec<String>,
 }
 
+/// What a mount of a service container points to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MountKind {
+    /// The service's own writable directory, `<data-dir>/services/<id>/data`.
+    Data,
+    /// A shared media directory, `<data-dir>/media/<media>`, filled by `files` packages.
+    Media,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mount {
+    pub kind: MountKind,
+    /// Media kind for `kind: media` (`music`, `audiobooks`, `video`, `books`, `games`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
+    /// Path inside the container.
+    pub target: String,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+/// How a `container` package runs: one rootless container behind the local HTTPS front.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceSpec {
+    /// Host name under which the front serves it, e.g. `navidrome.kit.local`.
+    pub host: String,
+    /// Port the application listens on inside the container (also used on 127.0.0.1).
+    pub port: u16,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mounts: Vec<Mount>,
+    /// Path that answers 200 when the application is up.
+    pub health_path: String,
+    /// Built-in first-run setup (`navidrome`), so no wizard is needed offline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provision: Option<String>,
+}
+
+/// How a `files` package is unpacked into a shared media directory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Extract {
+    /// Keep the file as it is.
+    None,
+    Zip,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentSpec {
+    /// Media kind; lands in `<data-dir>/media/<media>/<id>/`.
+    pub media: String,
+    pub extract: Extract,
+}
+
+pub const MEDIA_KINDS: &[&str] = &["music", "audiobooks", "video", "books", "games"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
@@ -96,6 +157,12 @@ pub struct Manifest {
     /// hosts entry, a vhost and a place in the local CA's name constraints. Exact hosts only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirror_domains: Vec<String>,
+    /// Required for `container` packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<ServiceSpec>,
+    /// Required for `files` packages that feed a service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<ContentSpec>,
 }
 
 /// A plain lowercase DNS host name with at least two labels; no wildcards, ports or IPs.
@@ -193,6 +260,57 @@ impl Manifest {
         }
         if !self.mirror_domains.is_empty() && self.kind != PackageType::Zim {
             errs.push("mirror_domains is only valid for type zim".into());
+        }
+        match (&self.service, self.kind) {
+            (Some(sv), PackageType::Container) => {
+                if !is_valid_host(&sv.host) {
+                    errs.push(format!(
+                        "service.host {:?} must be a lowercase host name",
+                        sv.host
+                    ));
+                }
+                if sv.port < 1 {
+                    errs.push("service.port must be set".into());
+                }
+                if !sv.health_path.starts_with('/') {
+                    errs.push("service.health_path must start with /".into());
+                }
+                for m in &sv.mounts {
+                    if !m.target.starts_with('/') {
+                        errs.push(format!("mount target {:?} must be an absolute path", m.target));
+                    }
+                    match (m.kind, m.media.as_deref()) {
+                        (MountKind::Media, Some(k)) if MEDIA_KINDS.contains(&k) => {}
+                        (MountKind::Media, other) => errs.push(format!(
+                            "media mount needs media: one of {} (got {other:?})",
+                            MEDIA_KINDS.join(", ")
+                        )),
+                        (MountKind::Data, Some(_)) => errs.push("data mounts take no media".into()),
+                        (MountKind::Data, None) => {}
+                    }
+                }
+                if let Some(p) = &sv.provision
+                    && p != "navidrome"
+                {
+                    errs.push(format!("unknown service.provision {p:?}"));
+                }
+            }
+            (Some(_), _) => errs.push("service is only valid for type container".into()),
+            (None, PackageType::Container) => errs.push("type container needs a service block".into()),
+            (None, _) => {}
+        }
+        if let Some(c) = &self.content {
+            if self.kind != PackageType::Files {
+                errs.push("content is only valid for type files".into());
+            }
+            if !MEDIA_KINDS.contains(&c.media.as_str()) {
+                errs.push(format!("content.media must be one of {}", MEDIA_KINDS.join(", ")));
+            }
+        }
+        if let Some(i) = &self.source.image
+            && !i.contains("@sha256:")
+        {
+            errs.push("source.image must be pinned by digest (repo[:tag]@sha256:...), images are verified by their digest".into());
         }
         if self.depends_on.contains(&self.id) {
             errs.push("depends_on must not contain the package itself".into());
@@ -458,7 +576,30 @@ license: {spdx: GPL-2.0-only}
             "source: {}",
             "source: {image: 'docker.io/jellyfin/jellyfin:10'}\nsize_bytes: 600000000",
         );
-        assert!(parse(&ok).unwrap().validate().is_empty());
+        let errs = parse(&ok).unwrap().validate();
+        assert!(errs.iter().any(|e| e.contains("pinned by digest")), "{errs:?}");
+        assert!(errs.iter().any(|e| e.contains("service block")), "{errs:?}");
+        let ok = c.replace(
+            "source: {}",
+            &format!(
+                "source: {{image: 'docker.io/jellyfin/jellyfin:10@sha256:{SHA}'}}\nsize_bytes: 600000000\n\
+                 service: {{host: jellyfin.kit.local, port: 8096, health_path: /health, \
+                 mounts: [{{kind: media, media: video, target: /media, read_only: true}}, {{kind: data, target: /config}}]}}"
+            ),
+        );
+        assert!(
+            parse(&ok).unwrap().validate().is_empty(),
+            "{:?}",
+            parse(&ok).unwrap().validate()
+        );
+        let bad = ok
+            .replace("media: video", "media: pictures")
+            .replace("jellyfin.kit.local", "Jelly Fin");
+        let errs = parse(&bad).unwrap().validate();
+        assert!(
+            errs.iter().any(|e| e.contains("media mount")) && errs.iter().any(|e| e.contains("service.host")),
+            "{errs:?}"
+        );
 
         let a = c.replace("container", "apt");
         let errs = parse(&a).unwrap().validate();

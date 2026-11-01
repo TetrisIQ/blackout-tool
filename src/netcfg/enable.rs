@@ -62,6 +62,8 @@ impl NetCtx<'_> {
 #[derive(Debug, Clone, Default)]
 pub struct Desired {
     pub mirrors: Vec<Mirror>,
+    /// Installed container services.
+    pub services: Vec<caddy::Service>,
     /// Every host any catalog package may mirror. Becomes the CA's name constraint, so installing
     /// another package later does not force a new CA.
     pub permitted: Vec<String>,
@@ -70,6 +72,7 @@ pub struct Desired {
 impl Desired {
     pub fn hosts(&self) -> Vec<String> {
         let mut h: Vec<String> = self.mirrors.iter().map(|m| m.host.clone()).collect();
+        h.extend(self.services.iter().map(|s| s.host.clone()));
         h.sort();
         h.dedup();
         h
@@ -232,7 +235,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     hosts_list.sort();
     if !have_mirrors {
         return Err(NetError::Invalid(
-            "no installed package mirrors a domain; install one first, e.g. `kit install --select wikipedia_de_nopic`".into(),
+            "no installed package mirrors a domain or runs a service; install one first, e.g. `kit install --select wikipedia_de_nopic`".into(),
         ));
     }
     let caddy_bin = ctx.require("caddy", &format!("Install it with: {}", caddy_hint()))?;
@@ -318,6 +321,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     // 2. Caddy.
     let caddyfile = paths.dir.join("Caddyfile");
     let mirrors = desired.mirrors.clone();
+    let services = desired.services.clone();
     let mut caddy_changed = false;
     steps.go(
         &format!(
@@ -330,6 +334,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
             let files = super::ca::CaFiles::new(ca_dir.clone());
             let text = caddy::render_caddyfile(&CaddySpec {
                 mirrors: &mirrors,
+                services: &services,
                 cert: files.leaf_cert(),
                 key: files.leaf_key(),
                 listen_port: ctx.listen_port,
@@ -750,6 +755,7 @@ mod tests {
 
     fn desired() -> Desired {
         Desired {
+            services: vec![],
             mirrors: vec![
                 mirror("de.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),
                 mirror("de.m.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),

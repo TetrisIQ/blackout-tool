@@ -2,6 +2,8 @@
 //! library XML and served by a systemd user service. All state lives in
 //! `<data-dir>/state/installed.json`; everything else is reconciled from it.
 
+pub mod container;
+pub mod media;
 pub mod portal;
 pub mod reconcile;
 pub mod runner;
@@ -58,6 +60,8 @@ pub struct Paths {
     pub data_dir: PathBuf,
     /// Directory for systemd user units (`~/.config/systemd/user`).
     pub unit_dir: PathBuf,
+    /// Podman Quadlet files (`~/.config/containers/systemd`); systemd turns them into units.
+    pub quadlet_dir: PathBuf,
 }
 
 impl Paths {
@@ -67,7 +71,37 @@ impl Paths {
                 return Err(InstallError::BadPath(p.display().to_string()));
             }
         }
-        Ok(Self { data_dir, unit_dir })
+        let quadlet_dir = data_dir.join("quadlet");
+        Ok(Self {
+            data_dir,
+            unit_dir,
+            quadlet_dir,
+        })
+    }
+
+    pub fn with_quadlet_dir(mut self, dir: PathBuf) -> Result<Self, InstallError> {
+        if dir.to_str().is_none() {
+            return Err(InstallError::BadPath(dir.display().to_string()));
+        }
+        self.quadlet_dir = dir;
+        Ok(self)
+    }
+
+    pub fn services_dir(&self) -> PathBuf {
+        self.data_dir.join("services")
+    }
+    /// Writable data of one service.
+    pub fn service_data_dir(&self, id: &str) -> PathBuf {
+        self.services_dir().join(id).join("data")
+    }
+    pub fn credentials_file(&self, id: &str) -> PathBuf {
+        self.services_dir().join(id).join("credentials.json")
+    }
+    pub fn media_dir(&self, media: &str) -> PathBuf {
+        self.data_dir.join("media").join(media)
+    }
+    pub fn quadlet_file(&self, id: &str) -> PathBuf {
+        self.quadlet_dir.join(format!("kit-{id}.container"))
     }
 
     pub fn downloads_dir(&self) -> PathBuf {
@@ -128,6 +162,11 @@ pub struct InstallInput {
     pub sha256: String,
     /// The download engine verified the checksum in this run, so the installer need not hash again.
     pub verified: bool,
+    /// `container` packages: the digest-pinned image reference.
+    pub image: Option<String>,
+    pub service: Option<crate::catalog::manifest::ServiceSpec>,
+    /// `files` packages feeding a service: where and how they are unpacked.
+    pub content: Option<crate::catalog::manifest::ContentSpec>,
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +201,8 @@ pub trait Installer {
 pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallError> {
     match kind {
         PackageType::Zim => Ok(Box::new(zim::ZimInstaller)),
+        PackageType::Container => Ok(Box::new(container::ContainerInstaller)),
+        PackageType::Files => Ok(Box::new(media::MediaInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",
             other.as_str()

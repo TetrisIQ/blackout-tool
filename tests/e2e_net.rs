@@ -107,6 +107,7 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
         &caddyfile,
         render_caddyfile(&CaddySpec {
             mirrors: &mirrors,
+            services: &[],
             cert: ca.files.leaf_cert(),
             key: ca.files.leaf_key(),
             listen_port,

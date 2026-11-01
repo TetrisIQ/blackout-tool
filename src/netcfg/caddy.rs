@@ -19,8 +19,16 @@ pub struct Mirror {
     pub book: String,
 }
 
+/// A container service reachable on loopback, served under its own host name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Service {
+    pub host: String,
+    pub port: u16,
+}
+
 pub struct CaddySpec<'a> {
     pub mirrors: &'a [Mirror],
+    pub services: &'a [Service],
     pub cert: PathBuf,
     pub key: PathBuf,
     pub listen_port: u16,
@@ -179,6 +187,21 @@ pub fn render_caddyfile(spec: &CaddySpec) -> String {
         out.push('\n');
         out.push_str(&site(&group, spec));
     }
+    let mut services: Vec<&Service> = spec.services.iter().collect();
+    services.sort_by(|a, b| a.host.cmp(&b.host));
+    for sv in services {
+        out.push_str(&format!(
+            "\nhttps://{host}:{https} {{\n\
+             \ttls {cert} {key}\n\
+             \treverse_proxy 127.0.0.1:{port}\n\
+             }}\n",
+            host = sv.host,
+            https = spec.listen_port,
+            cert = quote(&spec.cert),
+            key = quote(&spec.key),
+            port = sv.port,
+        ));
+    }
     out.push('\n');
     out.push_str(&portal_site(spec));
     out
@@ -230,6 +253,7 @@ mod tests {
     fn spec(m: &[Mirror]) -> CaddySpec<'_> {
         CaddySpec {
             mirrors: m,
+            services: &[],
             cert: "/d/net/ca/leaf.pem".into(),
             key: "/d/net/ca/leaf.key".into(),
             listen_port: 8443,
@@ -260,6 +284,20 @@ mod tests {
             3,
             "two mirror sites plus the portal"
         );
+    }
+
+    #[test]
+    fn services_get_their_own_vhost_proxying_to_loopback() {
+        let m = mirrors();
+        let services = [Service {
+            host: "navidrome.kit.local".into(),
+            port: 4533,
+        }];
+        let c = render_caddyfile(&CaddySpec {
+            services: &services,
+            ..spec(&m)
+        });
+        assert!(c.contains("https://navidrome.kit.local:8443 {\n\ttls \"/d/net/ca/leaf.pem\" \"/d/net/ca/leaf.key\"\n\treverse_proxy 127.0.0.1:4533\n}"));
     }
 
     #[test]

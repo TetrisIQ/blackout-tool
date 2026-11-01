@@ -1,0 +1,24 @@
+id: navidrome
+name: Navidrome (music server)
+description: Streams the installed music packs to any browser or Subsonic app, without internet.
+category: services
+type: container
+source:
+  image: 'docker.io/deluan/navidrome:0.64.2@sha256:38dc2727bfcfd5ede290f8ada114fc90368146f265ae4701ddddbcbe2a44ee52'
+size_bytes: 95000000
+license:
+  spdx: GPL-3.0-only
+  url: https://github.com/navidrome/navidrome/blob/master/LICENSE
+service:
+  host: navidrome.kit.local
+  port: 4533
+  health_path: /ping
+  provision: navidrome
+  env:
+    ND_MUSICFOLDER: /music
+    ND_DATAFOLDER: /data
+    ND_LOGLEVEL: info
+    ND_SCANNER_SCHEDULE: '@every 1m'
+  mounts:
+    - {kind: data, target: /data}
+    - {kind: media, media: music, target: /music, read_only: true}

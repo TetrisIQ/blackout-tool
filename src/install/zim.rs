@@ -140,6 +140,7 @@ impl Installer for ZimInstaller {
                     source: (!moved).then(|| input.source.clone()),
                     moved,
                 }],
+                service: None,
             },
         );
         state.port = Some(ctx.port);
@@ -280,6 +281,9 @@ mod tests {
                 size: size as u64,
                 sha256: SHA.into(),
                 verified: true,
+                image: None,
+                service: None,
+                content: None,
             }
         }
 
@@ -790,13 +794,10 @@ mod tests {
 
     #[test]
     fn unsupported_types_are_rejected() {
-        assert!(super::super::installer_for(PackageType::Zim).is_ok());
-        for t in [
-            PackageType::Files,
-            PackageType::Container,
-            PackageType::Apt,
-            PackageType::Model,
-        ] {
+        for t in [PackageType::Zim, PackageType::Files, PackageType::Container] {
+            assert!(super::super::installer_for(t).is_ok());
+        }
+        for t in [PackageType::Apt, PackageType::Model] {
             let e = super::super::installer_for(t).err().unwrap().to_string();
             assert!(e.contains("cannot be installed yet"), "{e}");
         }

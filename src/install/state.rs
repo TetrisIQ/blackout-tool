@@ -29,6 +29,19 @@ pub struct FileRecord {
     pub moved: bool,
 }
 
+/// A running container service behind the local front.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceRecord {
+    /// Host name under which the front serves it.
+    pub host: String,
+    /// Port on 127.0.0.1 (same as inside the container).
+    pub port: u16,
+    /// systemd user unit generated from the Quadlet file.
+    pub unit: String,
+    pub image: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
@@ -41,6 +54,8 @@ pub struct Record {
     /// Seconds since the Unix epoch.
     pub installed_at: u64,
     pub files: Vec<FileRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<ServiceRecord>,
 }
 
 impl Record {
@@ -69,9 +84,21 @@ impl Default for State {
 }
 
 impl State {
-    /// Library files of every installed package, in a stable order.
+    /// ZIM files of every installed zim package, in a stable order (the Kiwix library).
     pub fn library_files(&self) -> Vec<&FileRecord> {
-        self.packages.values().flat_map(|r| r.files.iter()).collect()
+        self.packages
+            .values()
+            .filter(|r| r.kind == PackageType::Zim)
+            .flat_map(|r| r.files.iter())
+            .collect()
+    }
+
+    /// Installed container services.
+    pub fn services(&self) -> Vec<(&Record, &ServiceRecord)> {
+        self.packages
+            .values()
+            .filter_map(|r| r.service.as_ref().map(|s| (r, s)))
+            .collect()
     }
 }
 
@@ -168,6 +195,7 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
             source: None,
             moved: false,
         }],
+        service: None,
     }
 }
 

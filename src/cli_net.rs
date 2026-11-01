@@ -77,10 +77,17 @@ fn desired(catalog: &Catalog, paths: &Paths) -> Result<(Desired, u16)> {
     let mut d = Desired::default();
     for m in catalog.packages() {
         d.permitted.extend(m.mirror_domains.iter().cloned());
+        d.permitted.extend(m.service.iter().map(|s| s.host.clone()));
     }
     d.permitted.sort();
     d.permitted.dedup();
-    for rec in guard.packages.values() {
+    for (_, sv) in guard.services() {
+        d.services.push(caddy::Service {
+            host: sv.host.clone(),
+            port: sv.port,
+        });
+    }
+    for rec in guard.packages.values().filter(|r| r.service.is_none()) {
         let Ok(manifest) = catalog.package(&rec.id) else {
             continue;
         };
