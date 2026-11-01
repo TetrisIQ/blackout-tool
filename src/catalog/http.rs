@@ -29,6 +29,14 @@ pub trait Http {
         })
     }
 
+    /// Like [`Http::post_json`] with a bearer token (second step of first-run provisioning).
+    fn post_json_bearer(&self, url: &str, _body: &str, _bearer: &str) -> Result<String, HttpError> {
+        Err(HttpError::Request {
+            url: url.to_string(),
+            message: "POST is not supported by this client".into(),
+        })
+    }
+
     /// URLs that were answered from an expired cache entry because the network failed.
     fn stale_urls(&self) -> Vec<String> {
         Vec::new()
@@ -51,6 +59,21 @@ impl Default for UreqHttp {
     }
 }
 
+impl UreqHttp {
+    fn post(&self, url: &str, body: &str, bearer: Option<&str>) -> Result<String, HttpError> {
+        let fail = |e: ureq::Error| HttpError::Request {
+            url: url.to_string(),
+            message: e.to_string(),
+        };
+        let mut req = self.agent.post(url).header("Content-Type", "application/json");
+        if let Some(t) = bearer {
+            req = req.header("Authorization", format!("Bearer {t}"));
+        }
+        let mut resp = req.send(body).map_err(fail)?;
+        resp.body_mut().read_to_string().map_err(fail)
+    }
+}
+
 impl Http for UreqHttp {
     fn get(&self, url: &str) -> Result<String, HttpError> {
         let fail = |e: ureq::Error| HttpError::Request {
@@ -62,17 +85,11 @@ impl Http for UreqHttp {
     }
 
     fn post_json(&self, url: &str, body: &str) -> Result<String, HttpError> {
-        let fail = |e: ureq::Error| HttpError::Request {
-            url: url.to_string(),
-            message: e.to_string(),
-        };
-        let mut resp = self
-            .agent
-            .post(url)
-            .header("Content-Type", "application/json")
-            .send(body)
-            .map_err(fail)?;
-        resp.body_mut().read_to_string().map_err(fail)
+        self.post(url, body, None)
+    }
+
+    fn post_json_bearer(&self, url: &str, body: &str, bearer: &str) -> Result<String, HttpError> {
+        self.post(url, body, Some(bearer))
     }
 }
 
@@ -205,6 +222,10 @@ pub(crate) mod testing {
         /// `(url, body)` of every POST.
         pub posted: std::sync::Mutex<Vec<(String, String)>>,
         pub post_fails: bool,
+        /// Canned POST responses by URL (default `{}`).
+        pub post_replies: HashMap<String, String>,
+        /// Bearer tokens seen, in order.
+        pub bearers: std::sync::Mutex<Vec<String>>,
     }
 
     impl FakeHttp {
@@ -237,7 +258,12 @@ pub(crate) mod testing {
                     message: "403".into(),
                 });
             }
-            Ok("{}".into())
+            Ok(self.post_replies.get(url).cloned().unwrap_or_else(|| "{}".into()))
+        }
+
+        fn post_json_bearer(&self, url: &str, body: &str, bearer: &str) -> Result<String, HttpError> {
+            self.bearers.lock().unwrap().push(bearer.into());
+            self.post_json(url, body)
         }
     }
 }

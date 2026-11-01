@@ -167,6 +167,72 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                 ))),
             }
         }
+        "audiobookshelf" => {
+            if ctx.paths.credentials_file(id).exists() {
+                return Ok(None);
+            }
+            let creds = Credentials {
+                username: "admin".into(),
+                password: random_hex(12)?,
+            };
+            let init =
+                serde_json::json!({"newRoot": {"username": creds.username, "password": creds.password}});
+            if let Err(e) = ctx.probe.post_json(&url(svc, "/init"), &init.to_string()) {
+                // Audiobookshelf refuses /init once a root user exists.
+                return Ok(Some(format!(
+                    "{id}: could not create the first login automatically ({e}); open https://{} and create it there",
+                    svc.host
+                )));
+            }
+            write_private(
+                &ctx.paths.credentials_file(id),
+                &(serde_json::to_string_pretty(&creds).unwrap_or_default() + "\n"),
+            )?;
+            // One library per media mount, so the books are there on first start.
+            let login = serde_json::json!({"username": creds.username, "password": creds.password});
+            let token = ctx
+                .probe
+                .post_json(&url(svc, "/login"), &login.to_string())
+                .ok()
+                .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+                .and_then(|v| v["user"]["token"].as_str().map(str::to_string));
+            let mut hint = format!(
+                "{id}: created the login '{}'; `kit status` shows the password",
+                creds.username
+            );
+            let Some(token) = token else {
+                hint.push_str("; could not log in to add the library, add it in the web interface");
+                return Ok(Some(hint));
+            };
+            for m in svc.mounts.iter().filter(|m| m.kind == MountKind::Media) {
+                let media = m.media.as_deref().unwrap_or("media");
+                let name = media[..1].to_uppercase() + &media[1..];
+                let lib = serde_json::json!({
+                    "name": name,
+                    "folders": [{"fullPath": m.target}],
+                    "mediaType": "book",
+                });
+                match ctx
+                    .probe
+                    .post_json_bearer(&url(svc, "/api/libraries"), &lib.to_string(), &token)
+                {
+                    Ok(reply) => {
+                        // The folder watcher only sees changes made after the library exists.
+                        if let Some(lib_id) = serde_json::from_str::<serde_json::Value>(&reply)
+                            .ok()
+                            .and_then(|v| v["id"].as_str().map(str::to_string))
+                        {
+                            let scan = url(svc, &format!("/api/libraries/{lib_id}/scan"));
+                            if let Err(e) = ctx.probe.post_json_bearer(&scan, "{}", &token) {
+                                hint.push_str(&format!("; could not scan the {name} library ({e})"));
+                            }
+                        }
+                    }
+                    Err(e) => hint.push_str(&format!("; could not add the {name} library ({e})")),
+                }
+            }
+            Ok(Some(hint))
+        }
         other => Err(InstallError::Unsupported(format!("unknown provisioner {other}"))),
     }
 }
@@ -700,6 +766,55 @@ mod tests {
             read_credentials(&e.paths, "navidrome").is_none(),
             "no credentials for a login that does not exist"
         );
+    }
+
+    #[test]
+    fn audiobookshelf_gets_root_login_and_a_library_per_media_mount() {
+        let e = Env::new();
+        let runner = host();
+        let mut input = e.input();
+        input.id = "audiobookshelf".into();
+        let svc = input.service.as_mut().unwrap();
+        svc.port = 13378;
+        svc.health_path = "/healthcheck".into();
+        svc.provision = Some("audiobookshelf".into());
+        svc.mounts = vec![Mount {
+            kind: MountKind::Media,
+            media: Some("audiobooks".into()),
+            target: "/audiobooks".into(),
+            read_only: true,
+        }];
+        let mut probe = FakeHttp::default().with("http://127.0.0.1:13378/healthcheck", "OK");
+        probe.post_replies.insert(
+            "http://127.0.0.1:13378/login".into(),
+            r#"{"user":{"token":"tok123"}}"#.into(),
+        );
+        probe.post_replies.insert(
+            "http://127.0.0.1:13378/api/libraries".into(),
+            r#"{"id":"lib1"}"#.into(),
+        );
+        let ctx = e.ctx(&runner, &probe);
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        ContainerInstaller.install(&input, &ctx, &mut guard).unwrap();
+
+        let posted = probe.posted.lock().unwrap();
+        let urls: Vec<&str> = posted.iter().map(|p| p.0.as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "http://127.0.0.1:13378/init",
+                "http://127.0.0.1:13378/login",
+                "http://127.0.0.1:13378/api/libraries",
+                "http://127.0.0.1:13378/api/libraries/lib1/scan"
+            ]
+        );
+        let creds = read_credentials(&e.paths, "audiobookshelf").unwrap();
+        assert!(posted[0].1.contains(&creds.password) && posted[1].1.contains(&creds.password));
+        assert!(
+            posted[2].1.contains("\"fullPath\":\"/audiobooks\"")
+                && posted[2].1.contains("\"name\":\"Audiobooks\"")
+        );
+        assert_eq!(*probe.bearers.lock().unwrap(), ["tok123", "tok123"]);
     }
 
     #[test]

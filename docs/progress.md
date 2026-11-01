@@ -78,3 +78,15 @@
 - The Musopen zip contains macOS `__MACOSX/` and `.DS_Store` files; Navidrome should ignore them but this is unverified.
 - The licence of the pack is the Public Domain Mark claimed on archive.org for Musopen's own release; a human legal review is still open (roadmap risk).
 - Audiobookshelf, Jellyfin and Kavita/Calibre-Web, further content packs (LibriVox, Blender Open Movies, Standard Ebooks, games) and the linger hint are the next slices.
+
+## Phase 6 - second slice: Audiobookshelf + LibriVox (implemented; real-host acceptance pending)
+- **Packages:** `audiobookshelf` (GPL-3.0-only, `ghcr.io/advplyr/audiobookshelf:2.37.2` by digest, port 13378, `https://audiobookshelf.kit.local`, books mounted read-only from `<data>/media/audiobooks`) and `librivox_alice` (LibriVox recording of *Alice in Wonderland*, 12 MP3 chapters, 86 MB, sha256 computed from a full download, SHA-1 matches archive.org).
+- **Provisioner:** `POST /init` creates the root user (`admin`, random password in `credentials.json`, shown by `kit status`), then `/login`, `POST /api/libraries` per media mount, then a library scan. The scan is needed: the folder watcher only sees changes made after the library exists, so books unpacked earlier were not listed (found on the real image, item count 0 until a scan ran).
+- **Framework change:** `Http::post_json_bearer` (needed for the authenticated calls).
+- **Verified for real, without touching the host's config:** the pinned image via `podman run` with the manifest's environment (`/healthcheck` 200, `/init` 200, library create 200, scan lists "Alice in Wonderland"); Quadlet dry run (`tests/quadlet.rs`); the real zip installs through `kit install` into a temp data dir. Image and container were removed again.
+- **Tests:** 225 unit tests (new: login, library and scan sequence with a fake HTTP client), `shipped_catalog_is_valid` covers both manifests.
+- **Acceptance (manual):** `test/accept_services.sh` now installs both; open `https://audiobookshelf.kit.local` and play a chapter offline.
+
+### Caveats
+- The public-domain status of LibriVox recordings (and of the source texts in every jurisdiction) needs a human legal review before shipping more titles.
+- `size_bytes` of the image (160 MB) is an estimate for the disk-space plan.

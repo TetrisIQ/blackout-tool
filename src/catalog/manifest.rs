@@ -107,7 +107,7 @@ pub struct ServiceSpec {
     pub mounts: Vec<Mount>,
     /// Path that answers 200 when the application is up.
     pub health_path: String,
-    /// Built-in first-run setup (`navidrome`), so no wizard is needed offline.
+    /// Built-in first-run setup (`navidrome`, `audiobookshelf`), so no wizard is needed offline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provision: Option<String>,
 }
@@ -129,6 +129,7 @@ pub struct ContentSpec {
     pub extract: Extract,
 }
 
+pub const PROVISIONERS: &[&str] = &["navidrome", "audiobookshelf"];
 pub const MEDIA_KINDS: &[&str] = &["music", "audiobooks", "video", "books", "games"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -290,7 +291,7 @@ impl Manifest {
                     }
                 }
                 if let Some(p) = &sv.provision
-                    && p != "navidrome"
+                    && !PROVISIONERS.contains(&p.as_str())
                 {
                     errs.push(format!("unknown service.provision {p:?}"));
                 }

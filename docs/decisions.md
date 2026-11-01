@@ -293,3 +293,6 @@ Zips are unpacked into a temporary directory and renamed into place (no half-unp
 2. **Updating an image** is a manifest change (new digest): the next `kit install` sees the recorded image differs, pulls, rewrites the Quadlet file and restarts the unit. The old image is not pruned automatically.
 3. **No linger hint yet** for container services (the Kiwix hint covers the same `loginctl enable-linger` need).
 4. **Legal status of content:** each pack states its licence; items hosted on archive.org carry an uploader-claimed licence, so only a source with a trustworthy provenance is shipped (Musopen, see progress notes). The roadmap's "legal check of each entertainment source" remains open for every further pack.
+
+## P6-6. Audiobookshelf provisioning scans explicitly
+Audiobookshelf has no environment-based first login; kit calls `/init`, `/login`, `POST /api/libraries` and then `POST /api/libraries/<id>/scan`. Found on the real image 2.37.2: without the scan the library stays empty, because books unpacked before the library exists are not seen by the folder watcher. Later packs are picked up by the watcher.
