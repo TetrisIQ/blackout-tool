@@ -49,6 +49,10 @@ pub fn require(name: &str, dirs: &[PathBuf]) -> Result<PathBuf, InstallError> {
                 "Install it with: {}",
                 install_hint(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
             )
+        } else if name == "pmtiles" {
+            "Get the go-pmtiles release for your system from \
+             https://github.com/protomaps/go-pmtiles/releases and put `pmtiles` on PATH."
+                .to_string()
         } else {
             "It must be available on PATH.".to_string()
         };

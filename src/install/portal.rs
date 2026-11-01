@@ -121,7 +121,7 @@ pub fn render_page(state: &State, origin: Origin) -> String {
             format_utc(r.installed_at),
         ));
     }
-    let games = render_apps(state);
+    let games = format!("{}{}", render_maps(state, origin), render_apps(state));
     if items.is_empty() && games.is_empty() {
         items.push_str("    <li>Nothing installed yet.</li>\n");
     }
@@ -151,6 +151,35 @@ pub fn render_page(state: &State, origin: Origin) -> String {
          <p><small>Emergency numbers: 112 (EU) · 110 police (DE) · 911 (US/CA)</small></p>\n\
          <h2>Installed content</h2>\n<ul>\n{items}</ul>\n{games}</body>\n</html>\n"
     )
+}
+
+/// Installed map regions. The viewer needs range requests, which only the HTTPS front serves.
+fn render_maps(state: &State, origin: Origin) -> String {
+    let maps = state.maps();
+    if maps.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("<h2>Maps</h2>\n<ul>\n");
+    for (r, _) in maps {
+        let detail = format!(
+            "{} · licence {} · map data © OpenStreetMap contributors",
+            format_bytes(r.size_bytes()),
+            esc(&r.license)
+        );
+        match origin {
+            Origin::Front { .. } => out.push_str(&format!(
+                "    <li><a href=\"/maps/\"><strong>{}</strong></a><br><small>{detail}</small></li>\n",
+                esc(&r.name)
+            )),
+            Origin::File(_) => out.push_str(&format!(
+                "    <li><strong>{}</strong><br><small>{detail} · open it at https://{PORTAL_HOST}/maps/ \
+                 after <code>kit net enable</code></small></li>\n",
+                esc(&r.name)
+            )),
+        }
+    }
+    out.push_str("</ul>\n");
+    out
 }
 
 /// Local programs (Flatpak), one list per group. A web page cannot start programs, so each entry
@@ -200,6 +229,72 @@ pub fn render_json(state: &State) -> String {
     serde_json::to_string_pretty(state).unwrap_or_else(|_| "{}".into())
 }
 
+const VIEWER: &str = include_str!("../../assets/maps/viewer.html");
+const VENDOR: [(&str, &str); 3] = [
+    ("leaflet.js", include_str!("../../assets/maps/leaflet.js")),
+    ("leaflet.css", include_str!("../../assets/maps/leaflet.css")),
+    (
+        "protomaps-leaflet.js",
+        include_str!("../../assets/maps/protomaps-leaflet.js"),
+    ),
+];
+
+/// `regions.json` for the viewer: name, file URL and bounds of every installed map.
+fn render_regions(state: &State) -> String {
+    let regions: Vec<_> = state
+        .maps()
+        .into_iter()
+        .filter_map(|(r, m)| {
+            let f = r.files.first()?;
+            Some(serde_json::json!({
+                "id": r.id,
+                "name": r.name,
+                "file": format!("/maps/data/{}", f.name),
+                "bbox": m.bbox,
+                "maxzoom": m.maxzoom,
+            }))
+        })
+        .collect();
+    serde_json::to_string_pretty(&regions).unwrap_or_else(|_| "[]".into())
+}
+
+/// The map viewer under `<portal>/maps/`: the page, the vendored scripts, `regions.json` and one
+/// symlink per region into `<data-dir>/maps/` (the front serves them with range requests).
+fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
+    let maps = dir.join("maps");
+    if state.maps().is_empty() {
+        return match fs::remove_dir_all(&maps) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io_err("cannot remove", &maps)(e)),
+        };
+    }
+    let (vendor, data) = (maps.join("vendor"), maps.join("data"));
+    for d in [&vendor, &data] {
+        fs::create_dir_all(d).map_err(io_err("cannot create", d))?;
+    }
+    write_atomic(&maps.join("index.html"), VIEWER)?;
+    for (name, text) in VENDOR {
+        write_atomic(&vendor.join(name), text)?;
+    }
+    write_atomic(&maps.join("regions.json"), &render_regions(state))?;
+    // Rebuild the links: drop stale ones, then point each installed file at the data directory.
+    for entry in fs::read_dir(&data)
+        .map_err(io_err("cannot read", &data))?
+        .flatten()
+    {
+        let _ = fs::remove_file(entry.path());
+    }
+    for (r, _) in state.maps() {
+        for f in &r.files {
+            let link = data.join(&f.name);
+            std::os::unix::fs::symlink(paths.maps_dir().join(&f.name), &link)
+                .map_err(io_err("cannot link", &link))?;
+        }
+    }
+    Ok(())
+}
+
 fn write_atomic(path: &Path, content: &str) -> Result<(), super::InstallError> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, content)
@@ -223,7 +318,8 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
         &dir.join(FRONT_PAGE),
         &render_page(state, Origin::Front { host: PORTAL_HOST }),
     )?;
-    write_atomic(&dir.join("installed.json"), &render_json(state))
+    write_atomic(&dir.join("installed.json"), &render_json(state))?;
+    write_maps(paths, state, &dir)
 }
 
 #[cfg(test)]
@@ -344,5 +440,30 @@ mod tests {
         write(&p, &State::default()).unwrap();
         assert!(!p.portal_dir().exists());
         write(&p, &State::default()).unwrap();
+    }
+
+    #[test]
+    fn maps_link_to_the_viewer_on_the_front_only() {
+        let mut st = State::default();
+        let mut r = sample_record("map_x", "map_x.pmtiles", 1_000_000);
+        r.name = "Map X".into();
+        r.kind = crate::catalog::PackageType::Map;
+        r.map = Some(super::super::state::MapRecord {
+            bbox: [1.0, 2.0, 3.0, 4.0],
+            maxzoom: 12,
+        });
+        st.packages.insert("map_x".into(), r);
+        let front = render_page(&st, Origin::Front { host: "kit.local" });
+        assert!(
+            front.contains("<h2>Maps</h2>") && front.contains("href=\"/maps/\""),
+            "{front}"
+        );
+        let file = render_index(&st);
+        assert!(
+            file.contains("kit net enable") && !file.contains("href=\"/maps/\""),
+            "{file}"
+        );
+        let regions = render_regions(&st);
+        assert!(regions.contains("/maps/data/map_x.pmtiles") && regions.contains("\"maxzoom\": 12"));
     }
 }

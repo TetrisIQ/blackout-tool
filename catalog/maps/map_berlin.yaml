@@ -1,0 +1,13 @@
+id: map_berlin
+name: Map of Berlin
+description: Street map of Berlin down to zoom 14 from OpenStreetMap, cut from the newest Protomaps build. Small enough to try the map viewer. The size is an estimate.
+category: maps
+type: map
+source:
+  map: {bbox: [13.08, 52.33, 13.76, 52.68], maxzoom: 14}
+size_bytes: 200000000
+license:
+  spdx: ODbL-1.0
+  url: https://www.openstreetmap.org/copyright
+  attribution: OpenStreetMap contributors; tiles by Protomaps
+languages: [de, en]

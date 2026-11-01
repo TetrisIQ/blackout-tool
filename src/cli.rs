@@ -513,6 +513,13 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
     if let Some(a) = &m.source.flatpak {
         writeln!(out, "  flatpak:    {a} (Flathub)")?;
     }
+    if let Some(r) = &m.source.map {
+        writeln!(
+            out,
+            "  region:     bbox {:?}, up to zoom {} (cut from the newest Protomaps build)",
+            r.bbox, r.maxzoom
+        )?;
+    }
     if let Some(g) = &m.group {
         writeln!(out, "  group:      {g}")?;
     }
@@ -831,6 +838,11 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
     if item.kind == crate::catalog::PackageType::Flatpak {
         return r.app.is_some();
     }
+    if item.kind == crate::catalog::PackageType::Map {
+        // The region comes from whichever build was newest at install time; it is kept until
+        // the user reinstalls (updates are Phase 10).
+        return r.map.is_some() && paths.maps_dir().join(format!("{}.pmtiles", item.id)).exists();
+    }
     r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref()
 }
 
@@ -855,6 +867,7 @@ fn install_input(
         content: manifest.content.clone(),
         flatpak: manifest.source.flatpak.clone(),
         group: manifest.group.clone(),
+        map: manifest.source.map.clone(),
     }
 }
 
@@ -866,6 +879,9 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
     }
     if kinds.contains(&T::Flatpak) {
         tools::require("flatpak", &ctx.search_path)?;
+    }
+    if kinds.contains(&T::Map) {
+        tools::require("pmtiles", &ctx.search_path)?;
     }
     if kinds.contains(&T::Container) {
         for t in ["podman", "systemctl"] {

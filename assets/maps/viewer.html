@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline maps</title>
+<link rel="stylesheet" href="vendor/leaflet.css">
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: .75rem; align-items: center; padding: .5rem 1rem; flex-wrap: wrap; }
+  header a { margin-right: auto; }
+  select, button { font-size: 1rem; padding: .3rem .6rem; }
+  #map { flex: 1; min-height: 12rem; }
+  #msg { padding: .5rem 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">Offline kit</a>
+  <label>Region <select id="region"></select></label>
+  <button id="locate" type="button">My position</button>
+</header>
+<div id="msg" hidden></div>
+<div id="map"></div>
+<script src="vendor/leaflet.js"></script>
+<script src="vendor/protomaps-leaflet.js"></script>
+<script>
+(async () => {
+  const msg = document.getElementById('msg');
+  const fail = (t) => { msg.textContent = t; msg.hidden = false; };
+  let regions;
+  try {
+    regions = await (await fetch('regions.json')).json();
+  } catch (e) {
+    return fail('The list of installed maps could not be read.');
+  }
+  if (!regions.length) return fail('No maps are installed.');
+
+  const map = L.map('map', { zoomControl: true, attributionControl: true });
+  let layer = null;
+  const select = document.getElementById('region');
+  regions.forEach((r, i) => select.add(new Option(r.name, i)));
+
+  function show(i) {
+    const r = regions[i];
+    if (layer) map.removeLayer(layer);
+    layer = protomapsL.leafletLayer({
+      url: r.file,
+      flavor: 'light',
+      attribution: '&copy; OpenStreetMap contributors (ODbL) &middot; Protomaps',
+    });
+    layer.addTo(map);
+    const [w, s, e, n] = r.bbox;
+    map.setMaxZoom(r.maxzoom);
+    map.fitBounds([[s, w], [n, e]]);
+  }
+  select.addEventListener('change', () => show(select.value));
+  show(0);
+
+  let marker = null;
+  document.getElementById('locate').addEventListener('click', () => {
+    if (!navigator.geolocation) return fail('This browser cannot tell your position.');
+    navigator.geolocation.getCurrentPosition((p) => {
+      const at = [p.coords.latitude, p.coords.longitude];
+      if (marker) marker.remove();
+      marker = L.circleMarker(at, { radius: 8 }).addTo(map);
+      map.setView(at, Math.min(14, map.getMaxZoom()));
+      msg.hidden = true;
+    }, () => fail('Your position is not available (no GPS or permission denied).'));
+  });
+})();
+</script>
+</body>
+</html>

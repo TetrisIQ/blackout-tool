@@ -1,0 +1,13 @@
+id: map_germany
+name: Map of Germany
+description: Street map of Germany down to zoom 13 (roads, paths, buildings, places) from OpenStreetMap, cut from the newest Protomaps build. The size is an estimate; the installed size is shown by `kit status`.
+category: maps
+type: map
+source:
+  map: {bbox: [5.86, 47.27, 15.04, 55.06], maxzoom: 13}
+size_bytes: 2500000000
+license:
+  spdx: ODbL-1.0
+  url: https://www.openstreetmap.org/copyright
+  attribution: OpenStreetMap contributors; tiles by Protomaps
+languages: [de, en]

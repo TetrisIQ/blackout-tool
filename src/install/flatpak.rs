@@ -131,6 +131,7 @@ impl Installer for FlatpakInstaller {
                     group,
                     by_kit,
                 }),
+                map: None,
             },
         );
         state.save()?;
@@ -284,6 +285,7 @@ mod tests {
             content: None,
             flatpak: Some(APP.into()),
             group: Some("sandbox".into()),
+            map: None,
         }
     }
 

@@ -150,3 +150,16 @@ Found by the first real install of the test profile: no login, no library.
 - **Checked:** `kit plan --profile standard` resolves all nine against the live catalog; 239 unit tests and `shipped_catalog_is_valid` pass.
 - **Caveats:** the DevDocs ZIMs are tagged `_ftindex:no`, so the unified search (Phase 5) finds them by title only. Licences are those of the upstream documentation (man pages are a mix, `Linux-man-pages-copyleft` is the project's umbrella); the DevDocs ZIMs were not opened to confirm per-page notices.
 - **Still open in Phase 7:** maps, local LLM (`survival-llm` evaluation, hardware check), Whisper/translation packs, optional apt/pip mirror subset. The "done when" criterion is not met yet.
+
+## Phase 7 - second slice: offline maps (PMTiles + browser viewer)
+- **New package type `map`** (`source.map: {bbox: [w, s, e, n], maxzoom}`, estimated `size_bytes`, no `url`/`sha256`). Protomaps publishes only dated ~115 GB planet files, so kit cuts the region out with `pmtiles extract` from the newest build (`build-metadata.protomaps.dev/builds.json`, range requests: only the region is transferred), runs `pmtiles verify`, and records its own SHA-256 (`kit verify --deep` compares it). **Documented exception to rule 7:** there is no upstream checksum for a derived region.
+- **Installer** `install::map`: needs `pmtiles` on PATH (go-pmtiles; the missing-tool error says where to get it), writes `<data-dir>/maps/<id>.pmtiles` via a `.part` file, idempotent, a failed extract/verify leaves no file and no record. Uninstall removes the file. Updating to a newer build is Phase 10.
+- **Viewer:** Leaflet 1.9.4 + protomaps-leaflet 5.1.0 vendored in `assets/maps/` (BSD, no CDN, vector tiles drawn on canvas with system fonts, so no glyph/sprite files). `portal::write` puts it under `<portal>/maps/` with `regions.json` and a symlink per region; Caddy's `file_server` already serves the portal directory with range requests, so the Caddyfile did not change. The portal lists a "Maps" section; opened as a file it says to run `kit net enable`, because a `file://` page cannot do range requests.
+- **Catalog:** `map_germany` (zoom 13) in `standard` and `full`, `map_berlin` (zoom 14) in `test`.
+- **Tests:** 269 pass (new: manifest rules, installer against `FakeRunner`/`FakeHttp` incl. failed verify, offline, missing tool, verify/uninstall; portal section and `regions.json`).
+
+### Caveats
+- **Sizes in the two manifests are guesses.** I could not run `pmtiles extract --dry-run` in this session (downloading the binary was blocked). Measure with `pmtiles extract <build URL> /dev/null --bbox=... --maxzoom=... --dry-run` and fix `size_bytes` before relying on `kit plan`.
+- **Not run for real:** `pmtiles extract` against a live build, and the viewer in a browser (including range requests through Caddy, symlinks, label fonts). Needs `pmtiles`, caddy and a browser.
+- **The viewer shows no search/routing**, only panning, zoom, region switch and the browser's geolocation.
+- Still open in Phase 7: local LLM (`survival-llm` is a desktop app around Ollama with its own library, not a model; plan is Ollama/llama.cpp as a service plus Kiwix search), hardware check, Whisper/translation, apt/pip mirror subset.

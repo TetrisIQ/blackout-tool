@@ -54,7 +54,16 @@ pub struct AppRecord {
     pub by_kit: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The region of an installed map; the viewer starts there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapRecord {
+    /// West, south, east, north.
+    pub bbox: [f64; 4],
+    pub maxzoom: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record {
     pub id: String,
@@ -70,6 +79,8 @@ pub struct Record {
     pub service: Option<ServiceRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<AppRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<MapRecord>,
 }
 
 impl Record {
@@ -78,7 +89,7 @@ impl Record {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct State {
     pub version: u32,
@@ -112,6 +123,14 @@ impl State {
         self.packages
             .values()
             .filter_map(|r| r.app.as_ref().map(|a| (r, a)))
+            .collect()
+    }
+
+    /// Installed map regions, in a stable order.
+    pub fn maps(&self) -> Vec<(&Record, &MapRecord)> {
+        self.packages
+            .values()
+            .filter_map(|r| r.map.as_ref().map(|m| (r, m)))
             .collect()
     }
 
@@ -219,6 +238,7 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
         }],
         service: None,
         app: None,
+        map: None,
     }
 }
 

@@ -4,6 +4,7 @@
 
 pub mod container;
 pub mod flatpak;
+pub mod map;
 pub mod media;
 pub mod portal;
 pub mod reconcile;
@@ -101,6 +102,10 @@ impl Paths {
     pub fn media_dir(&self, media: &str) -> PathBuf {
         self.data_dir.join("media").join(media)
     }
+    /// Map regions (`<id>.pmtiles`); the portal links them next to the viewer.
+    pub fn maps_dir(&self) -> PathBuf {
+        self.data_dir.join("maps")
+    }
     pub fn quadlet_file(&self, id: &str) -> PathBuf {
         self.quadlet_dir.join(format!("kit-{id}.container"))
     }
@@ -171,6 +176,8 @@ pub struct InstallInput {
     /// `flatpak` packages: the Flathub application id and the portal group.
     pub flatpak: Option<String>,
     pub group: Option<String>,
+    /// `map` packages: the region to cut out.
+    pub map: Option<crate::catalog::manifest::MapRef>,
 }
 
 #[derive(Debug, Clone)]
@@ -208,6 +215,7 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Container => Ok(Box::new(container::ContainerInstaller)),
         PackageType::Files => Ok(Box::new(media::MediaInstaller)),
         PackageType::Flatpak => Ok(Box::new(flatpak::FlatpakInstaller)),
+        PackageType::Map => Ok(Box::new(map::MapInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",
             other.as_str()

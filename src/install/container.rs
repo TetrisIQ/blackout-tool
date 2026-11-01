@@ -554,6 +554,7 @@ impl Installer for ContainerInstaller {
                     image: image.clone(),
                 }),
                 app: None,
+                map: None,
             },
         );
         state.save()?;
@@ -800,6 +801,7 @@ mod tests {
                 content: None,
                 flatpak: None,
                 group: None,
+                map: None,
             }
         }
     }
