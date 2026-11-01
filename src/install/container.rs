@@ -93,13 +93,25 @@ fn url(svc: &ServiceSpec, path: &str) -> String {
     format!("http://127.0.0.1:{}{path}", svc.port)
 }
 
+/// How long a container may take to answer after it started. The first start runs migrations
+/// (Jellyfin and Kavita need 10-30 s); tests set `start_wait` to zero and do not wait at all.
+const START_WAIT: Duration = Duration::from_secs(180);
+
+fn start_wait(ctx: &Ctx) -> Duration {
+    if ctx.start_wait.is_zero() {
+        Duration::ZERO
+    } else {
+        START_WAIT
+    }
+}
+
 fn wait_healthy(ctx: &Ctx, svc: &ServiceSpec) -> bool {
     let mut waited = Duration::ZERO;
     loop {
         if ctx.probe.get(&url(svc, &svc.health_path)).is_ok() {
             return true;
         }
-        if waited >= ctx.start_wait {
+        if waited >= start_wait(ctx) {
             return false;
         }
         let step = Duration::from_millis(500);
@@ -242,6 +254,34 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                 username: "admin".into(),
                 password: random_hex(12)?,
             };
+            // /health already answers while Jellyfin's start-up page is still up (it takes the
+            // POSTs and drops them); the real server reports the wizard state, with capital keys.
+            let mut waited = Duration::ZERO;
+            let wizard_done = loop {
+                let state = ctx
+                    .probe
+                    .get(&url(svc, "/System/Info/Public"))
+                    .ok()
+                    .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+                    .and_then(|v| v["StartupWizardCompleted"].as_bool());
+                if let Some(done) = state {
+                    break done;
+                }
+                if waited >= start_wait(ctx) {
+                    return Ok(Some(format!(
+                        "{id}: the server did not report its setup state; open https://{} and create the login there",
+                        svc.host
+                    )));
+                }
+                thread::sleep(Duration::from_millis(500));
+                waited += Duration::from_millis(500);
+            };
+            if wizard_done {
+                return Ok(Some(format!(
+                    "{id}: was set up already; log in at https://{} with your own login",
+                    svc.host
+                )));
+            }
             // The setup wizard, answered with the defaults for an offline machine.
             let wizard: [(&str, serde_json::Value); 3] = [
                 (
@@ -255,7 +295,15 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                 ("/Startup/Complete", serde_json::json!({})),
             ];
             for (path, body) in wizard {
-                if let Err(e) = ctx.probe.post_json(&url(svc, path), &body.to_string()) {
+                // Jellyfin creates its first user when the wizard reads it; posting before the
+                // read gives a 404.
+                let step = if path == "/Startup/User" {
+                    ctx.probe.get(&url(svc, path)).map(drop)
+                } else {
+                    Ok(())
+                }
+                .and_then(|()| ctx.probe.post_json(&url(svc, path), &body.to_string()));
+                if let Err(e) = step {
                     // The wizard refuses its steps once it has been completed.
                     return Ok(Some(format!(
                         "{id}: could not create the first login automatically ({e}); open https://{} and create it there",
@@ -981,7 +1029,13 @@ mod tests {
         let e = Env::new();
         let runner = host();
         let input = media_service(&e, "jellyfin", 8096, "/health", "video", "/media");
-        let mut probe = FakeHttp::default().with("http://127.0.0.1:8096/health", "Healthy");
+        let mut probe = FakeHttp::default()
+            .with("http://127.0.0.1:8096/health", "Healthy")
+            .with(
+                "http://127.0.0.1:8096/System/Info/Public",
+                r#"{"StartupWizardCompleted":false}"#,
+            )
+            .with("http://127.0.0.1:8096/Startup/User", r#"{"Name":"root"}"#);
         probe.post_replies.insert(
             "http://127.0.0.1:8096/Users/AuthenticateByName".into(),
             r#"{"AccessToken":"tok9"}"#.into(),
@@ -1011,6 +1065,25 @@ mod tests {
         let auths = probe.auths.lock().unwrap();
         assert!(!auths[0].contains("Token="));
         assert!(auths[1].ends_with("Token=\"tok9\""));
+    }
+
+    #[test]
+    fn jellyfin_that_is_set_up_already_is_left_alone() {
+        let e = Env::new();
+        let runner = host();
+        let input = media_service(&e, "jellyfin", 8096, "/health", "video", "/media");
+        let probe = FakeHttp::default()
+            .with("http://127.0.0.1:8096/health", "Healthy")
+            .with(
+                "http://127.0.0.1:8096/System/Info/Public",
+                r#"{"StartupWizardCompleted":true}"#,
+            );
+        let ctx = e.ctx(&runner, &probe);
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        let notes = ContainerInstaller.install(&input, &ctx, &mut guard).unwrap();
+        assert!(probe.posted.lock().unwrap().is_empty());
+        assert!(notes.iter().any(|n| n.contains("set up already")), "{notes:?}");
+        assert!(!e.paths.credentials_file("jellyfin").exists());
     }
 
     #[test]

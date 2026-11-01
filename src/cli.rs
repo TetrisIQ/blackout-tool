@@ -808,16 +808,19 @@ fn make_ctx<'a>(env: &'a Env, paths: &Paths, port: u16) -> Ctx<'a> {
     }
 }
 
-fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog) -> bool {
+fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &install::Paths) -> bool {
     let Some(r) = state.packages.get(&item.id) else {
         return false;
     };
     if item.kind == crate::catalog::PackageType::Container {
-        let image = catalog
-            .package(&item.id)
-            .ok()
-            .and_then(|m| m.source.image.as_deref());
-        return r.service.as_ref().map(|s| s.image.as_str()) == image && image.is_some();
+        let manifest = catalog.package(&item.id).ok();
+        let image = manifest.and_then(|m| m.source.image.as_deref());
+        // A service whose first-run login was never created (the start timed out, say) is retried.
+        let unprovisioned = manifest
+            .and_then(|m| m.service.as_ref())
+            .is_some_and(|s| s.provision.is_some())
+            && !paths.credentials_file(&item.id).exists();
+        return r.service.as_ref().map(|s| s.image.as_str()) == image && image.is_some() && !unprovisioned;
     }
     r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref()
 }
@@ -882,20 +885,24 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
     let kinds: Vec<_> = plan.items.iter().map(|i| i.kind).collect();
     ensure_tools_for(&ctx, &kinds, !prior.library_files().is_empty())?;
 
-    for item in plan.items.iter().filter(|i| is_current(&prior, i, catalog)) {
+    for item in plan
+        .items
+        .iter()
+        .filter(|i| is_current(&prior, i, catalog, &paths))
+    {
         writeln!(out, "{}: already installed", item.id)?;
     }
     let jobs = build_jobs(
         &plan,
         &paths.downloads_dir(),
-        &|i| !is_current(&prior, i, catalog),
+        &|i| !is_current(&prior, i, catalog, &paths),
         out,
     )?;
     // Everything not current gets installed, with or without a download (containers have none).
     let todo: Vec<&plan::PlanItem> = plan
         .items
         .iter()
-        .filter(|i| !is_current(&prior, i, catalog))
+        .filter(|i| !is_current(&prior, i, catalog, &paths))
         .collect();
     let input_for = |item: &plan::PlanItem, verified: bool| -> Result<InstallInput> {
         let job = jobs.iter().find(|j| j.item.id == item.id);

@@ -108,3 +108,11 @@
 
 ## Test profile
 `catalog/profiles/test.yaml` (`kit plan --profile test`, `kit install --profile test`): all four services plus one small pack each, two small ZIMs (Arch Wiki, Wikivoyage) for the cross-library search. 4.3 GB in total, of which Musopen is 2.4 GB (the only free music pack so far).
+
+## Fix: Jellyfin and Kavita first-run setup on a real host
+Found by the first real install of the test profile: no login, no library.
+- **Cause 1:** the health wait was 3 s for containers; Jellyfin and Kavita need 10-30 s on first start (migrations). The install failed after the state was written, and a re-run saw the package as current and never provisioned. Now: 180 s wait for containers (`START_WAIT`), and a service with a provisioner but no `credentials.json` counts as not current, so the next `kit install` retries.
+- **Cause 2 (Jellyfin):** `/health` answers 200 while the start-up page is still up; the wizard POSTs go to that page and are dropped. Now kit waits until `/System/Info/Public` reports `StartupWizardCompleted`, and leaves a wizard that is already completed alone. The wizard also needs a `GET /Startup/User` before the `POST` (404 otherwise).
+- **Verified for real** (podman, temp dirs): fresh Jellyfin image, the full call sequence incl. library and scan lists the film.
+- **Not covered by the first slice's tests:** timing against real images. Unit tests use a fake HTTP client with no waits.
+- **Recovering an install that was set up by hand:** `kit uninstall jellyfin kavita --purge`, then `kit install --profile test`.
