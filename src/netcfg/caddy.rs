@@ -69,7 +69,8 @@ fn site(host_group: &[&Mirror], spec: &CaddySpec) -> String {
          \t\tpath /w/index.php /wiki/Special:Search /w/\n\
          \t}}\n\
          \thandle @search {{\n\
-         \t\turi query >search pattern\n\
+         \t\turi query pattern {{query.search}}\n\
+         \t\turi query -search\n\
          \t\turi query content {book}\n\
          \t\trewrite * /search\n\
          \t\t{proxy}\n\
@@ -210,6 +211,7 @@ mod tests {
         let c = render_caddyfile(&spec(&mirrors()));
         assert!(c.contains("uri path_regexp ^/wiki/(.*)$ /content/wikipedia_de_all_nopic_2026-10/$1"));
         assert!(c.contains("uri query content wikipedia_en_all_nopic_2026-09"));
+        assert!(c.contains("uri query pattern {query.search}") && c.contains("uri query -search"));
         assert!(c.contains("header_up Host 127.0.0.1:6589"));
         assert!(c.contains("header_down Location ^http://[^/]+/ https://{host}/"));
         assert!(c.contains("Not available offline"));

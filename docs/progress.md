@@ -54,9 +54,9 @@
 - **Pieces:** marked `/etc/hosts` block (exact removal), nftables redirect 443 -> 8443 in its own table, Caddyfile + `kit-caddy.service` user unit, system store (`trust anchor` / `update-ca-certificates`) and NSS (`certutil`) trust, all behind `CommandRunner` with separate unprivileged and root runners.
 - **CLI:** `kit net enable [--dry-run] [--renew-ca] | disable [--remove-ca] | status | check [--samples N]`. State of what was done is in `<data>/net/state.json`, so `disable` undoes exactly that.
 - **Tests:** 30+ new unit tests (hosts, nft, Caddyfile golden, trust commands, enable/disable/status idempotency, privilege separation, link checker), one OpenSSL test, one opt-in end-to-end test with real Caddy and kiwix-serve. No test touches `/etc`, nftables, systemd, certificate stores or real browser profiles.
-- **Still to do for acceptance (needs this machine, `caddy` is not installed yet):** `sudo pacman -S caddy`, run `test/accept_net.sh` (enable, `kit net check`, Firefox with the cable unplugged on `https://de.wikipedia.org/wiki/Berlin`, disable and confirm hosts/nft/NSS/trust are clean), then `KIT_E2E_ZIM=... cargo test --test e2e_net -- --ignored`.
+- **Still to do for acceptance (needs sudo and Firefox):** run `test/accept_net.sh` (enable, `kit net check`, Firefox with the cable unplugged on `https://de.wikipedia.org/wiki/Berlin`, disable and confirm hosts/nft/NSS/trust are clean).
 
 ### Caveats
-- The Caddyfile has not run against a real Caddy yet (see decisions P4-7); expect small syntax fixes from the first `caddy validate`.
+- The Caddyfile was validated against Caddy 2.11.7 via `tests/e2e_net.rs` (first run fixed the search rewrite: `uri query >a b` is not valid, kit now sets `pattern` from `{query.search}` and drops `search`).
 - Chromium is not installed here; only Firefox/`~/.pki/nssdb` can be verified. Flatpak/Snap browsers keep their own store and are not covered.
 - The 443 redirect is gone after a reboot (`kit net enable` restores it).
