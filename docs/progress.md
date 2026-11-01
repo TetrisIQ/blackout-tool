@@ -116,3 +116,7 @@ Found by the first real install of the test profile: no login, no library.
 - **Verified for real** (podman, temp dirs): fresh Jellyfin image, the full call sequence incl. library and scan lists the film.
 - **Not covered by the first slice's tests:** timing against real images. Unit tests use a fake HTTP client with no waits.
 - **Recovering an install that was set up by hand:** `kit uninstall jellyfin kavita --purge`, then `kit install --profile test`.
+
+## Fix: Jellyfin library stayed empty after provisioning
+- **Cause (from the Jellyfin log of a real install):** `Startup/Complete` makes Jellyfin validate its still empty library ("Validating media library"). The scan that `refreshLibrary=true` starts while the library is created runs at the same moment and is dropped, so the film never appeared until a manual scan. A fresh container in four parallel runs could not reproduce it; it depends on timing.
+- **Fix:** after creating the library, kit asks for a scan (`POST /Library/Refresh`) and checks `/Items` until a film is listed (up to 10 tries, 3 s apart; only when a video pack is installed), and says so if it never shows. `Http::get_auth` was added for the check.

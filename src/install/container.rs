@@ -350,6 +350,39 @@ fn provision(kind: &str, id: &str, ctx: &Ctx, svc: &ServiceSpec) -> Result<Optio
                     hint.push_str(&format!("; could not add the {name} library ({e})"));
                 }
             }
+            // Creating a library starts a scan, but Jellyfin is still validating its (empty) library
+            // from the wizard then and drops it (seen on a real host: "0 items"). So ask again until
+            // the films show up.
+            let has_media = fs::read_dir(ctx.paths.media_dir("video")).is_ok_and(|mut d| d.next().is_some());
+            let items = url(
+                svc,
+                "/Items?Recursive=true&IncludeItemTypes=Movie,Episode,Video&Limit=1",
+            );
+            let refresh = url(svc, "/Library/Refresh");
+            let attempts = if ctx.start_wait.is_zero() { 1 } else { 10 };
+            let mut found = !has_media;
+            for _ in 0..attempts {
+                if !ctx.start_wait.is_zero() {
+                    thread::sleep(Duration::from_secs(3));
+                }
+                if let Err(e) = ctx.probe.post_json_auth(&refresh, "{}", &auth) {
+                    hint.push_str(&format!("; could not scan the libraries ({e})"));
+                    break;
+                }
+                found = found
+                    || ctx
+                        .probe
+                        .get_auth(&items, &auth)
+                        .ok()
+                        .and_then(|r| serde_json::from_str::<serde_json::Value>(&r).ok())
+                        .is_some_and(|v| v["TotalRecordCount"].as_u64().unwrap_or(0) > 0);
+                if found {
+                    break;
+                }
+            }
+            if !found {
+                hint.push_str("; the films are not listed yet, use Dashboard > Libraries > Scan");
+            }
             Ok(Some(hint))
         }
         "kavita" => {
@@ -1054,6 +1087,7 @@ mod tests {
                 "http://127.0.0.1:8096/Startup/Complete",
                 "http://127.0.0.1:8096/Users/AuthenticateByName",
                 "http://127.0.0.1:8096/Library/VirtualFolders?name=Video&collectionType=movies&refreshLibrary=true",
+                "http://127.0.0.1:8096/Library/Refresh",
             ]
         );
         let creds = read_credentials(&e.paths, "jellyfin").unwrap();
@@ -1065,6 +1099,38 @@ mod tests {
         let auths = probe.auths.lock().unwrap();
         assert!(!auths[0].contains("Token="));
         assert!(auths[1].ends_with("Token=\"tok9\""));
+    }
+
+    #[test]
+    fn jellyfin_says_so_when_the_films_do_not_show_up() {
+        let e = Env::new();
+        let runner = host();
+        let input = media_service(&e, "jellyfin", 8096, "/health", "video", "/media");
+        let pack = e.paths.media_dir("video").join("film");
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(pack.join("film.mkv"), "x").unwrap();
+        let mut probe = FakeHttp::default()
+            .with("http://127.0.0.1:8096/health", "Healthy")
+            .with(
+                "http://127.0.0.1:8096/System/Info/Public",
+                r#"{"StartupWizardCompleted":false}"#,
+            )
+            .with("http://127.0.0.1:8096/Startup/User", "{}")
+            .with(
+                "http://127.0.0.1:8096/Items?Recursive=true&IncludeItemTypes=Movie,Episode,Video&Limit=1",
+                r#"{"TotalRecordCount":0}"#,
+            );
+        probe.post_replies.insert(
+            "http://127.0.0.1:8096/Users/AuthenticateByName".into(),
+            r#"{"AccessToken":"t"}"#.into(),
+        );
+        let ctx = e.ctx(&runner, &probe);
+        let mut guard = StateGuard::open(&e.paths).unwrap();
+        let notes = ContainerInstaller.install(&input, &ctx, &mut guard).unwrap();
+        assert!(
+            notes.iter().any(|n| n.contains("films are not listed yet")),
+            "{notes:?}"
+        );
     }
 
     #[test]

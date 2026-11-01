@@ -38,6 +38,14 @@ pub trait Http {
         })
     }
 
+    /// GET with a complete `Authorization` header value.
+    fn get_auth(&self, url: &str, _authorization: &str) -> Result<String, HttpError> {
+        Err(HttpError::Request {
+            url: url.to_string(),
+            message: "authenticated GET is not supported by this client".into(),
+        })
+    }
+
     /// URLs that were answered from an expired cache entry because the network failed.
     fn stale_urls(&self) -> Vec<String> {
         Vec::new()
@@ -82,6 +90,20 @@ impl Http for UreqHttp {
             message: e.to_string(),
         };
         let mut resp = self.agent.get(url).call().map_err(fail)?;
+        resp.body_mut().read_to_string().map_err(fail)
+    }
+
+    fn get_auth(&self, url: &str, authorization: &str) -> Result<String, HttpError> {
+        let fail = |e: ureq::Error| HttpError::Request {
+            url: url.to_string(),
+            message: e.to_string(),
+        };
+        let mut resp = self
+            .agent
+            .get(url)
+            .header("Authorization", authorization)
+            .call()
+            .map_err(fail)?;
         resp.body_mut().read_to_string().map_err(fail)
     }
 
@@ -260,6 +282,11 @@ pub(crate) mod testing {
                 });
             }
             Ok(self.post_replies.get(url).cloned().unwrap_or_else(|| "{}".into()))
+        }
+
+        fn get_auth(&self, url: &str, authorization: &str) -> Result<String, HttpError> {
+            self.auths.lock().unwrap().push(authorization.into());
+            self.get(url)
         }
 
         fn post_json_auth(&self, url: &str, body: &str, authorization: &str) -> Result<String, HttpError> {
