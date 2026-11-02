@@ -115,6 +115,7 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
             kiwix_port,
             portal_dir: portal.clone(),
             portal_host: "kit.local".into(),
+            ollama_port: None,
         }),
     )
     .unwrap();

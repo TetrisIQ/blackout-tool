@@ -12,6 +12,7 @@ use crate::catalog::PackageType;
 use crate::catalog::manifest::OllamaRef;
 
 /// Where the Ollama server listens by default.
+pub const OLLAMA_PORT: u16 = 11434;
 pub const OLLAMA_URL: &str = "http://127.0.0.1:11434";
 
 pub struct ModelInstaller;

@@ -64,6 +64,8 @@ pub struct Desired {
     pub mirrors: Vec<Mirror>,
     /// Installed container services.
     pub services: Vec<caddy::Service>,
+    /// Port of the local Ollama server when a language model is installed.
+    pub ollama_port: Option<u16>,
     /// Every host any catalog package may mirror. Becomes the CA's name constraint, so installing
     /// another package later does not force a new CA.
     pub permitted: Vec<String>,
@@ -342,6 +344,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
                 kiwix_port: ctx.kiwix_port,
                 portal_dir: ctx.data_dir.join("portal"),
                 portal_host: PORTAL_HOST.to_string(),
+                ollama_port: desired.ollama_port,
             });
             caddy_changed |= write_if_changed(&caddyfile, &text)?;
             // Never start Caddy with a config it rejects.
@@ -756,6 +759,7 @@ mod tests {
     fn desired() -> Desired {
         Desired {
             services: vec![],
+            ollama_port: None,
             mirrors: vec![
                 mirror("de.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),
                 mirror("de.m.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),

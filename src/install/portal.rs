@@ -121,7 +121,12 @@ pub fn render_page(state: &State, origin: Origin) -> String {
             format_utc(r.installed_at),
         ));
     }
-    let games = format!("{}{}", render_maps(state, origin), render_apps(state));
+    let games = format!(
+        "{}{}{}",
+        render_assistant(state, origin),
+        render_maps(state, origin),
+        render_apps(state)
+    );
     if items.is_empty() && games.is_empty() {
         items.push_str("    <li>Nothing installed yet.</li>\n");
     }
@@ -229,6 +234,52 @@ pub fn render_json(state: &State) -> String {
     serde_json::to_string_pretty(state).unwrap_or_else(|_| "{}".into())
 }
 
+const ASSISTANT: &str = include_str!("../../assets/ai/chat.html");
+const ASSISTANT_JS: &str = include_str!("../../assets/ai/rag.js");
+
+/// The assistant page under `<portal>/ai/`, or nothing when no language model is installed.
+fn write_assistant(state: &State, dir: &Path) -> Result<(), super::InstallError> {
+    let ai = dir.join("ai");
+    let Some((_, model)) = state.models().into_iter().next() else {
+        return match fs::remove_dir_all(&ai) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io_err("cannot remove", &ai)(e)),
+        };
+    };
+    fs::create_dir_all(&ai).map_err(io_err("cannot create", &ai))?;
+    write_atomic(&ai.join("index.html"), ASSISTANT)?;
+    write_atomic(&ai.join("rag.js"), ASSISTANT_JS)?;
+    write_atomic(
+        &ai.join("config.json"),
+        &serde_json::json!({ "model": model.name }).to_string(),
+    )
+}
+
+/// The assistant entry. The page needs the HTTPS front (it talks to Kiwix and Ollama on one origin).
+fn render_assistant(state: &State, origin: Origin) -> String {
+    let models = state.models();
+    let Some((r, m)) = models.first() else {
+        return String::new();
+    };
+    let detail = format!(
+        "{} · licence {} · answers only from the library, with the passages shown",
+        esc(&m.name),
+        esc(&r.license)
+    );
+    let entry = match origin {
+        Origin::Front { .. } => format!(
+            "    <li><a href=\"/ai/\"><strong>Ask the assistant</strong></a><br><small>{detail}</small></li>\n"
+        ),
+        Origin::File(_) => format!(
+            "    <li><strong>Assistant</strong><br><small>{detail} · open it at https://{PORTAL_HOST}/ai/ \
+             after <code>kit net enable</code>; in a terminal: <code>ollama run {}</code></small></li>\n",
+            esc(&m.name)
+        ),
+    };
+    format!("<h2>Assistant</h2>\n<ul>\n{entry}</ul>\n")
+}
+
 const VIEWER: &str = include_str!("../../assets/maps/viewer.html");
 const VENDOR: [(&str, &str); 3] = [
     ("leaflet.js", include_str!("../../assets/maps/leaflet.js")),
@@ -319,6 +370,7 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
         &render_page(state, Origin::Front { host: PORTAL_HOST }),
     )?;
     write_atomic(&dir.join("installed.json"), &render_json(state))?;
+    write_assistant(state, &dir)?;
     write_maps(paths, state, &dir)
 }
 
@@ -465,5 +517,52 @@ mod tests {
         );
         let regions = render_regions(&st);
         assert!(regions.contains("/maps/data/map_x.pmtiles") && regions.contains("\"maxzoom\": 12"));
+    }
+
+    #[test]
+    fn assistant_page_and_config_exist_only_with_a_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
+        let mut st = State::default();
+        let mut r = sample_record("llm", "x.bin", 1);
+        r.kind = crate::catalog::PackageType::Model;
+        r.model = Some(super::super::state::ModelRecord {
+            name: "granite4.2:3b".into(),
+            size: 1,
+            by_kit: true,
+        });
+        st.packages.insert("llm".into(), r);
+        write(&paths, &st).unwrap();
+        let ai = paths.portal_dir().join("ai");
+        assert!(
+            fs::read_to_string(ai.join("index.html"))
+                .unwrap()
+                .contains("Offline assistant")
+        );
+        assert!(
+            fs::read_to_string(ai.join("rag.js"))
+                .unwrap()
+                .contains("parseSearch")
+        );
+        assert_eq!(
+            fs::read_to_string(ai.join("config.json")).unwrap(),
+            r#"{"model":"granite4.2:3b"}"#
+        );
+        let front = render_page(&st, Origin::Front { host: "kit.local" });
+        assert!(
+            front.contains("<h2>Assistant</h2>") && front.contains("href=\"/ai/\""),
+            "{front}"
+        );
+        let file = render_index(&st);
+        assert!(
+            file.contains("ollama run granite4.2:3b") && !file.contains("href=\"/ai/\""),
+            "{file}"
+        );
+
+        st.packages
+            .insert("other".into(), sample_record("other", "a.zim", 1));
+        st.packages.remove("llm");
+        write(&paths, &st).unwrap();
+        assert!(!ai.exists());
     }
 }

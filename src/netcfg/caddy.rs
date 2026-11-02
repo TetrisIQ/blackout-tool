@@ -38,6 +38,9 @@ pub struct CaddySpec<'a> {
     /// Where `kit.html` lives; served at `https://<portal_host>/`.
     pub portal_dir: PathBuf,
     pub portal_host: String,
+    /// Port of the local Ollama server; set when a language model is installed. The portal then
+    /// proxies exactly `chat` and `tags` of its API to the assistant page.
+    pub ollama_port: Option<u16>,
 }
 
 /// The portal's plain-HTTP port next to the HTTPS one.
@@ -154,6 +157,24 @@ fn portal_site(spec: &CaddySpec) -> String {
     for path in ["/content/*", "/search*", "/skin/*", "/suggest*", "/catalog/*"] {
         out.push_str(&format!("\thandle {path} {{\n\t\t{proxy}\n\t}}\n"));
     }
+    if let Some(port) = spec.ollama_port {
+        // Only what the assistant page needs; pull, delete and the rest of Ollama's API stay closed.
+        // The browser's Origin is dropped because Ollama rejects origins it does not know.
+        out.push_str(&format!(
+            "\n\t@aiapi path /ai/api/chat /ai/api/tags\n\
+             \thandle @aiapi {{\n\
+             \t\turi strip_prefix /ai\n\
+             \t\treverse_proxy 127.0.0.1:{port} {{\n\
+             \t\t\theader_up Host 127.0.0.1:{port}\n\
+             \t\t\theader_up -Origin\n\
+             \t\t\tflush_interval -1\n\
+             \t\t}}\n\
+             \t}}\n\
+             \thandle /ai/api/* {{\n\
+             \t\trespond \"Not allowed\" 403\n\
+             \t}}\n"
+        ));
+    }
     out.push_str(&format!(
         "\n\thandle {{\n\
          \t\troot * {}\n\
@@ -261,6 +282,7 @@ mod tests {
             kiwix_port: 6589,
             portal_dir: "/d/portal".into(),
             portal_host: "kit.local".into(),
+            ollama_port: None,
         }
     }
 
@@ -342,5 +364,24 @@ mod tests {
             "ExecStart=/usr/bin/caddy run --config \"/home/a b/kit/net/Caddyfile\" --adapter caddyfile"
         ));
         assert!(!is_managed("[Unit]\n"));
+    }
+
+    #[test]
+    fn assistant_api_is_limited_to_chat_and_tags() {
+        let m = mirrors();
+        let without = render_caddyfile(&spec(&m));
+        assert!(!without.contains("/ai/api"));
+        let c = render_caddyfile(&CaddySpec {
+            ollama_port: Some(11434),
+            ..spec(&m)
+        });
+        assert!(c.contains("@aiapi path /ai/api/chat /ai/api/tags"), "{c}");
+        assert!(c.contains("reverse_proxy 127.0.0.1:11434") && c.contains("header_up -Origin"));
+        assert!(c.contains("flush_interval -1"));
+        // /ai/api/chat reaches Ollama as /api/chat.
+        assert!(c.contains("uri strip_prefix /ai\n"), "{c}");
+        assert!(c.contains("handle /ai/api/* {\n\t\trespond \"Not allowed\" 403"));
+        // The limited proxy must come before the catch-all file server.
+        assert!(c.find("@aiapi").unwrap() < c.rfind("file_server").unwrap());
     }
 }

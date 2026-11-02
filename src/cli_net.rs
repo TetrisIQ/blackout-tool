@@ -87,6 +87,9 @@ fn desired(catalog: &Catalog, paths: &Paths) -> Result<(Desired, u16)> {
             port: sv.port,
         });
     }
+    if !guard.models().is_empty() {
+        d.ollama_port = Some(crate::install::model::OLLAMA_PORT);
+    }
     for rec in guard.packages.values().filter(|r| r.service.is_none()) {
         let Ok(manifest) = catalog.package(&rec.id) else {
             continue;

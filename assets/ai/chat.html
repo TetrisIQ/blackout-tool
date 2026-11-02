@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offline assistant</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 46rem; margin: 0 auto; padding: 0 1rem 6rem; line-height: 1.5; }
+  header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; padding-top: 1rem; }
+  header a { margin-right: auto; }
+  .notice { border: 1px solid; border-radius: .5rem; padding: .5rem .8rem; font-size: .9rem; margin: .8rem 0; }
+  .turn { margin: 1rem 0; }
+  .q { font-weight: 600; }
+  .a { white-space: pre-wrap; }
+  .src { font-size: .85rem; margin-top: .3rem; }
+  .src a { margin-right: .8rem; }
+  .status { font-size: .85rem; opacity: .75; }
+  form { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: .5rem; padding: .6rem 1rem;
+         background: Canvas; border-top: 1px solid; max-width: 46rem; margin: 0 auto; box-sizing: border-box; }
+  input { flex: 1; font-size: 1.1rem; padding: .4rem; }
+  button { font-size: 1.1rem; padding: .4rem 1rem; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">Offline kit</a>
+  <strong>Assistant</strong> <small id="model"></small>
+</header>
+<div class="notice">
+  In an emergency call <strong>112</strong> (Europe) or <strong>911</strong> (US/CA) first.
+  This is a small model that can be wrong. It answers only from the library passages listed under each
+  answer; check them yourself, especially for first aid.
+</div>
+<div id="log"></div>
+<form id="form">
+  <input id="q" type="text" autocomplete="off" placeholder="Ask a question" required autofocus>
+  <button id="go" type="submit">Ask</button>
+</form>
+<script src="rag.js"></script>
+<script>
+(async () => {
+  const log = document.getElementById('log');
+  const form = document.getElementById('form');
+  const input = document.getElementById('q');
+  const go = document.getElementById('go');
+  const history = [];
+  let model = null;
+
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+
+  try {
+    model = (await (await fetch('config.json')).json()).model;
+    document.getElementById('model').textContent = model;
+  } catch (e) {
+    log.append(el('p', 'status', 'No assistant is installed.'));
+    go.disabled = true;
+    return;
+  }
+
+  const chat = (body) => fetch('api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // think: false - the hidden reasoning would use up the short answer budget and delay the first word.
+    body: JSON.stringify({ model, keep_alive: '30m', think: false, ...body }),
+  });
+
+  async function keywords(question) {
+    try {
+      const r = await chat({ stream: false, messages: Rag.keywordMessages(question),
+                             options: { temperature: 0, num_predict: 24, num_ctx: 2048 } });
+      return Rag.cleanKeywords((await r.json()).message.content, question);
+    } catch (e) {
+      return Rag.cleanKeywords('', question);
+    }
+  }
+
+  // `query` is the English keyword string: the library is English, the question may not be.
+  async function passages(query) {
+    const r = await fetch('/search?format=xml&pageLength=6&pattern=' + encodeURIComponent(query));
+    const hits = Rag.dropVariants(Rag.parseSearch(await r.text())).slice(0, 4);
+    const out = [];
+    for (const h of hits) {
+      try {
+        const page = await (await fetch(h.href)).text();
+        out.push({ title: h.title, href: h.href, text: Rag.pickPassage(Rag.htmlToText(page), query, 1400) });
+      } catch (e) {
+        out.push({ title: h.title, href: h.href, text: h.snippet });
+      }
+    }
+    // Keep passages that mention at least half of the search terms (title included).
+    return out.filter((p) => p.text.length > 0 && Rag.coverage(p.title + ' ' + p.text, query) >= 0.5);
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    input.value = '';
+    go.disabled = true;
+    const turn = el('div', 'turn');
+    const status = el('div', 'status', 'Searching the library ...');
+    const answer = el('div', 'a');
+    const src = el('div', 'src');
+    turn.append(el('div', 'q', question), status, answer, src);
+    log.append(turn);
+    try {
+      const query = await keywords(question);
+      const found = await passages(query);
+      if (found.length === 0) {
+        status.textContent = '';
+        answer.textContent = 'Nothing about this was found in the installed library (searched: ' + query + '). ' +
+          'No answer is given without a source.';
+        return;
+      }
+      status.textContent = 'Answering from ' + found.length + ' passage' + (found.length > 1 ? 's' : '') + ' ...';
+      src.append('Passages used: ');
+      found.forEach((p, i) => {
+        const a = el('a', '', '[' + (i + 1) + '] ' + p.title);
+        a.href = p.href;
+        src.append(a);
+      });
+      const resp = await chat({ stream: true, messages: Rag.buildMessages(question, found, history),
+                                options: { temperature: 0.2, num_ctx: 8192, num_predict: 700 } });
+      if (!resp.ok) throw new Error('assistant answered ' + resp.status);
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '', full = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          const part = JSON.parse(line);
+          if (part.message && part.message.content) {
+            full += part.message.content;
+            answer.textContent = full;
+            status.textContent = '';
+          }
+        }
+      }
+      history.push({ role: 'user', content: question }, { role: 'assistant', content: full });
+      if (history.length > 6) history.splice(0, 2);
+    } catch (e) {
+      status.textContent = '';
+      answer.textContent = 'Something went wrong: ' + e.message + '. Is the assistant (Ollama) running?';
+    } finally {
+      go.disabled = false;
+      input.focus();
+    }
+  });
+})();
+</script>
+</body>
+</html>

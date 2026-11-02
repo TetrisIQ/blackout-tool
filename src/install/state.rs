@@ -139,6 +139,14 @@ impl State {
             .collect()
     }
 
+    /// Installed language models, in a stable order.
+    pub fn models(&self) -> Vec<(&Record, &ModelRecord)> {
+        self.packages
+            .values()
+            .filter_map(|r| r.model.as_ref().map(|m| (r, m)))
+            .collect()
+    }
+
     /// Installed map regions, in a stable order.
     pub fn maps(&self) -> Vec<(&Record, &MapRecord)> {
         self.packages
