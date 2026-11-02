@@ -173,7 +173,12 @@ Found by the first real install of the test profile: no login, no library.
 - **Try it:** start Ollama, `kit install --select llm_granite_3b`, then `ollama run granite4.2:3b`.
 
 ### Caveats
-- **Not run against a real Ollama** (none installed here). The pull itself, `kit verify` and `kit uninstall` are covered by fakes only.
+- **Real run (Ollama 0.40.13, 8 GB GPU, temp data dir):** `kit install --select llm_granite_3b` pulled the model in 24 s, `kit verify` passed, `ollama list` shows it. Not yet run for real: `kit uninstall` (`ollama rm`).
 - `ollama pull` output is captured, so a 2.2 GB pull shows no progress bar in `kit install`.
 - **Safety:** Survival LLM's own evaluation found Granite 4.2 3B gave harmful first-aid answers (5 of 22). It is a speed-first starting point, not a recommendation; the evaluation gate and grounding in the Kiwix library (plan slices 5 and 6) come before it ships in a profile as the default. Meanwhile it is in `standard` and `full` so it can be tested.
 - Not done yet from the plan: `kit hw` detection, automatic model choice, thinking model, chat page, engine tarball fallback.
+
+### First real answers (granite4.2:3b, 8 GB GPU, 100 % on GPU, 4096 context)
+- Speed: 88 tok/s; a 165-token answer took 3.2 s (1.1 s of it loading), a 1,061-token answer 12.2 s.
+- Quality (2 questions, not an evaluation): the burn answer was short and mostly right but advises antibiotic ointment, which first-aid guidance usually leaves out for fresh burns. "How far from a downed power line?" gave no distance at all and a long hedging answer. Both are the kind of gap that grounding in the library and the evaluation gate have to catch.
+- The `ID` in `ollama list` (`40577dc168a3`) is not the version kit shows (`20e436143017`, the weights layer's digest prefix); they are different digests.
