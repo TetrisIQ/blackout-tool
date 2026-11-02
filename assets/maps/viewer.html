@@ -7,6 +7,11 @@
 <link rel="stylesheet" href="vendor/leaflet.css">
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  /* set by the portal's reading frame so the page follows its theme switch */
+  :root[data-theme=light] { color-scheme: light; }
+  :root[data-theme=dark] { color-scheme: dark; }
+  /* inside the portal frame the portal header already links home */
+  :root.framed a[href="/"] { display: none; }
   html, body { height: 100%; margin: 0; }
   body { display: flex; flex-direction: column; }
   header { display: flex; gap: .75rem; align-items: center; padding: .5rem 1rem; flex-wrap: wrap; }
@@ -23,6 +28,7 @@
   #hits li:hover, #hits li.on { background: Highlight; color: HighlightText; }
   #hits small { opacity: .7; }
 </style>
+<script>if (self !== top) document.documentElement.classList.add('framed');</script>
 </head>
 <body>
 <header>

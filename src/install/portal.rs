@@ -221,10 +221,10 @@ fn launcher_tiles(state: &State, origin: Origin) -> String {
         ));
     }
     if matches!(origin, Origin::Front { .. }) && !state.maps().is_empty() {
-        tiles.push_str(&tile(icon::MAP, "Maps", "/maps/"));
+        tiles.push_str(&tile(icon::MAP, "Maps", "/read.html#/maps/"));
     }
     if matches!(origin, Origin::Front { .. }) && !state.models().is_empty() {
-        tiles.push_str(&tile(icon::ASSISTANT, "Assistant", "/ai/"));
+        tiles.push_str(&tile(icon::ASSISTANT, "Assistant", "/read.html#/ai/"));
     }
     tiles
 }
@@ -678,7 +678,7 @@ mod tests {
         });
         st.packages.insert("map_x".into(), r);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
-        assert!(front.contains("href=\"/maps/\""), "{front}");
+        assert!(front.contains("href=\"/read.html#/maps/\""), "{front}");
         assert!(!render_index(&st).contains("href=\"/maps/\""));
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
@@ -732,7 +732,7 @@ mod tests {
         st.packages.insert(other.id.clone(), other);
         assert_eq!(survival_books(&st), ["ready.gov_en_all_2026-10"]);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
-        assert!(front.contains("href=\"/ai/\""), "{front}");
+        assert!(front.contains("href=\"/read.html#/ai/\""), "{front}");
         assert!(!render_index(&st).contains("href=\"/ai/\""));
 
         st.packages

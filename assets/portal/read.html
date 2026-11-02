@@ -56,17 +56,22 @@ header { border-bottom: 1px solid var(--color-divider); }
   var MEDIA = 'img, video, picture, canvas, iframe, object, embed';
   var css = MEDIA.split(', ').map(function (t) { return 'html.kit-dark ' + t; }).join(', ') +
     ' { filter: invert(1) hue-rotate(180deg); }';
+  // Kiwix articles get the inversion; the portal's own pages (/ai/, /maps/) take the theme directly.
+  function isArticle(path) { return !/^\/(ai|maps)\//.test(path); }
   function theme() {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
-    frame.classList.toggle('dark', dark);
     try {
-      var d = frame.contentDocument;
+      var d = frame.contentDocument, path = frame.contentWindow.location.pathname;
+      var article = isArticle(path);
+      frame.classList.toggle('dark', dark && article);
       if (!d || !d.head) return;
+      d.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      if (!article) return;
       if (!d.getElementById('kit-dark')) {
         var st = d.createElement('style'); st.id = 'kit-dark'; st.textContent = css; d.head.appendChild(st);
       }
       d.documentElement.classList.toggle('kit-dark', dark);
-    } catch (e) {}
+    } catch (e) { frame.classList.toggle('dark', dark && isArticle(target())); }
   }
   new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   theme();

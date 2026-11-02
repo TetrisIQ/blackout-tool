@@ -6,6 +6,11 @@
 <title>Offline assistant</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  /* set by the portal's reading frame so the page follows its theme switch */
+  :root[data-theme=light] { color-scheme: light; }
+  :root[data-theme=dark] { color-scheme: dark; }
+  /* inside the portal frame the portal header already links home */
+  :root.framed a[href="/"] { display: none; }
   body { max-width: 46rem; margin: 0 auto; padding: 0 1rem 6rem; line-height: 1.5; }
   header { display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap; padding-top: 1rem; }
   header a { margin-right: auto; }
@@ -25,6 +30,7 @@
   input { flex: 1; font-size: 1.1rem; padding: .4rem; }
   button { font-size: 1.1rem; padding: .4rem 1rem; }
 </style>
+<script>if (self !== top) document.documentElement.classList.add('framed');</script>
 </head>
 <body>
 <header>
