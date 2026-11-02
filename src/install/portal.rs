@@ -1,4 +1,4 @@
-//! The portal page: a search box over all installed libraries, emergency shortcuts and a tile per
+//! The portal page ("Blackout", template in `assets/portal/page.html`): a search box over all installed libraries, emergency shortcuts and a tile per
 //! installed package. Written twice: `index.html` for opening as a file (absolute links to the
 //! Kiwix port) and `kit.html` for `https://kit.local` (relative links, same origin as Kiwix).
 
@@ -7,7 +7,7 @@ use std::path::Path;
 
 use super::state::State;
 use super::{DEFAULT_PORT, Paths, io_err};
-use crate::catalog::manifest::{APP_GROUPS, PackageType};
+use crate::catalog::manifest::PackageType;
 use crate::plan::format_bytes;
 
 /// Host name of the portal behind the local HTTPS front.
@@ -42,23 +42,6 @@ pub fn format_utc(secs: u64) -> String {
     )
 }
 
-/// Quick searches for situations where nobody wants to think of keywords: (label, search terms).
-/// Terms in several languages; the cross-library search simply finds whatever is installed.
-pub const EMERGENCY_SEARCHES: &[(&str, &str)] = &[
-    ("First aid / Erste Hilfe", "first aid Erste Hilfe"),
-    ("Resuscitation / Wiederbelebung", "CPR Reanimation"),
-    (
-        "Safe drinking water / Trinkwasser",
-        "water purification Trinkwasser",
-    ),
-    ("Bleeding and wounds / Wunden", "bleeding wound Blutung"),
-    ("Hypothermia and heat / Unterkühlung", "hypothermia Unterkühlung"),
-    (
-        "Food storage / Lebensmittel haltbar",
-        "food preservation Haltbarmachen",
-    ),
-];
-
 /// Where the page is served from.
 #[derive(Debug, Clone, Copy)]
 pub enum Origin<'a> {
@@ -72,149 +55,272 @@ pub fn render_index(state: &State) -> String {
     render_page(state, Origin::File(state.port.unwrap_or(DEFAULT_PORT)))
 }
 
-pub fn render_page(state: &State, origin: Origin) -> String {
-    let (base, title_note) = match origin {
-        Origin::File(port) => (
-            format!("http://localhost:{port}"),
-            "Installed content, served locally by Kiwix.".to_string(),
-        ),
-        Origin::Front { host } => (
-            String::new(),
-            format!("You are on {} - no internet needed.", esc(host)),
-        ),
-    };
-    let mut items = String::new();
+const PAGE: &str = include_str!("../../assets/portal/page.html");
+const READ: &str = include_str!("../../assets/portal/read.html");
+const RESULTS: &str = include_str!("../../assets/portal/results.html");
+const THEME_JS: &str = include_str!("../../assets/portal/theme.js");
+const CSS: &str = include_str!("../../assets/portal/portal.css");
+const COMMON_JS: &str = include_str!("../../assets/portal/common.js");
+
+/// Font Awesome Free 6.7.2 solid icons (https://fontawesome.com, icons CC BY 4.0), inlined so the page
+/// works offline: (viewBox, path elements). See `assets/portal/ICONS.md`.
+mod icon {
+    pub type Icon = (&'static str, &'static str);
+    pub const LIBRARY: Icon = (
+        "0 0 576 512",
+        r#"<path d="M249.6 471.5c10.8 3.8 22.4-4.1 22.4-15.5l0-377.4c0-4.2-1.6-8.4-5-11C247.4 52 202.4 32 144 32C93.5 32 46.3 45.3 18.1 56.1C6.8 60.5 0 71.7 0 83.8L0 454.1c0 11.9 12.8 20.2 24.1 16.5C55.6 460.1 105.5 448 144 448c33.9 0 79 14 105.6 23.5zm76.8 0C353 462 398.1 448 432 448c38.5 0 88.4 12.1 119.9 22.6c11.3 3.8 24.1-4.6 24.1-16.5l0-370.3c0-12.1-6.8-23.3-18.1-27.6C529.7 45.3 482.5 32 432 32c-58.4 0-103.4 20-123 35.6c-3.3 2.6-5 6.8-5 11L304 456c0 11.4 11.7 19.3 22.4 15.5z"/>"#,
+    );
+    pub const VIDEO: Icon = (
+        "0 0 512 512",
+        r#"<path d="M0 96C0 60.7 28.7 32 64 32l384 0c35.3 0 64 28.7 64 64l0 320c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 96zM48 368l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16l-32 0c-8.8 0-16 7.2-16 16zm368-16c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16l-32 0zM48 240l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16l-32 0c-8.8 0-16 7.2-16 16zm368-16c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16l-32 0zM48 112l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16L64 96c-8.8 0-16 7.2-16 16zM416 96c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l32 0c8.8 0 16-7.2 16-16l0-32c0-8.8-7.2-16-16-16l-32 0zM160 128l0 64c0 17.7 14.3 32 32 32l128 0c17.7 0 32-14.3 32-32l0-64c0-17.7-14.3-32-32-32L192 96c-17.7 0-32 14.3-32 32zm32 160c-17.7 0-32 14.3-32 32l0 64c0 17.7 14.3 32 32 32l128 0c17.7 0 32-14.3 32-32l0-64c0-17.7-14.3-32-32-32l-128 0z"/>"#,
+    );
+    pub const MUSIC: Icon = (
+        "0 0 512 512",
+        r#"<path d="M499.1 6.3c8.1 6 12.9 15.6 12.9 25.7l0 72 0 264c0 44.2-43 80-96 80s-96-35.8-96-80s43-80 96-80c11.2 0 22 1.6 32 4.6L448 147 192 223.8 192 432c0 44.2-43 80-96 80s-96-35.8-96-80s43-80 96-80c11.2 0 22 1.6 32 4.6L128 200l0-72c0-14.1 9.3-26.6 22.8-30.7l320-96c9.7-2.9 20.2-1.1 28.3 5z"/>"#,
+    );
+    pub const AUDIOBOOK: Icon = (
+        "0 0 512 512",
+        r#"<path d="M256 80C149.9 80 62.4 159.4 49.6 262c9.4-3.8 19.6-6 30.4-6c26.5 0 48 21.5 48 48l0 128c0 26.5-21.5 48-48 48c-44.2 0-80-35.8-80-80l0-16 0-48 0-48C0 146.6 114.6 32 256 32s256 114.6 256 256l0 48 0 48 0 16c0 44.2-35.8 80-80 80c-26.5 0-48-21.5-48-48l0-128c0-26.5 21.5-48 48-48c10.8 0 21 2.1 30.4 6C449.6 159.4 362.1 80 256 80z"/>"#,
+    );
+    pub const EBOOK: Icon = (
+        "0 0 512 512",
+        r#"<path d="M160 96a96 96 0 1 1 192 0A96 96 0 1 1 160 96zm80 152l0 264-48.4-24.2c-20.9-10.4-43.5-17-66.8-19.3l-96-9.6C12.5 457.2 0 443.5 0 427L0 224c0-17.7 14.3-32 32-32l30.3 0c63.6 0 125.6 19.6 177.7 56zm32 264l0-264c52.1-36.4 114.1-56 177.7-56l30.3 0c17.7 0 32 14.3 32 32l0 203c0 16.4-12.5 30.2-28.8 31.8l-96 9.6c-23.2 2.3-45.9 8.9-66.8 19.3L272 512z"/>"#,
+    );
+    pub const MAP: Icon = (
+        "0 0 576 512",
+        r#"<path d="M408 120c0 54.6-73.1 151.9-105.2 192c-7.7 9.6-22 9.6-29.6 0C241.1 271.9 168 174.6 168 120C168 53.7 221.7 0 288 0s120 53.7 120 120zm8 80.4c3.5-6.9 6.7-13.8 9.6-20.6c.5-1.2 1-2.5 1.5-3.7l116-46.4C558.9 123.4 576 135 576 152l0 270.8c0 9.8-6 18.6-15.1 22.3L416 503l0-302.6zM137.6 138.3c2.4 14.1 7.2 28.3 12.8 41.5c2.9 6.8 6.1 13.7 9.6 20.6l0 251.4L32.9 502.7C17.1 509 0 497.4 0 480.4L0 209.6c0-9.8 6-18.6 15.1-22.3l122.6-49zM327.8 332c13.9-17.4 35.7-45.7 56.2-77l0 249.3L192 449.4 192 255c20.5 31.3 42.3 59.6 56.2 77c20.5 25.6 59.1 25.6 79.6 0zM288 152a40 40 0 1 0 0-80 40 40 0 1 0 0 80z"/>"#,
+    );
+    pub const ASSISTANT: Icon = (
+        "0 0 640 512",
+        r#"<path d="M320 0c17.7 0 32 14.3 32 32l0 64 120 0c39.8 0 72 32.2 72 72l0 272c0 39.8-32.2 72-72 72l-304 0c-39.8 0-72-32.2-72-72l0-272c0-39.8 32.2-72 72-72l120 0 0-64c0-17.7 14.3-32 32-32zM208 384c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zM264 256a40 40 0 1 0 -80 0 40 40 0 1 0 80 0zm152 40a40 40 0 1 0 0-80 40 40 0 1 0 0 80zM48 224l16 0 0 192-16 0c-26.5 0-48-21.5-48-48l0-96c0-26.5 21.5-48 48-48zm544 0c26.5 0 48 21.5 48 48l0 96c0 26.5-21.5 48-48 48l-16 0 0-192 16 0z"/>"#,
+    );
+    pub const SERVER: Icon = (
+        "0 0 512 512",
+        r#"<path d="M64 32C28.7 32 0 60.7 0 96l0 64c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-64c0-35.3-28.7-64-64-64L64 32zm280 72a24 24 0 1 1 0 48 24 24 0 1 1 0-48zm48 24a24 24 0 1 1 48 0 24 24 0 1 1 -48 0zM64 288c-35.3 0-64 28.7-64 64l0 64c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-64c0-35.3-28.7-64-64-64L64 288zm280 72a24 24 0 1 1 0 48 24 24 0 1 1 0-48zm56 24a24 24 0 1 1 48 0 24 24 0 1 1 -48 0z"/>"#,
+    );
+}
+
+/// One launcher tile.
+fn tile((view_box, body): icon::Icon, label: &str, href: &str) -> String {
+    format!(
+        "        <a href=\"{href}\"><span class=\"ico\"><svg width=\"20\" height=\"20\" viewBox=\"{view_box}\" \
+         fill=\"currentColor\" aria-hidden=\"true\">{body}</svg></span>{}</a>\n",
+        esc(label)
+    )
+}
+
+/// A service gets the icon of what it does when the name says so.
+fn service_icon(name: &str) -> icon::Icon {
+    let name = name.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| name.contains(w));
+    if has(&["audiobook"]) {
+        icon::AUDIOBOOK
+    } else if has(&["jellyfin", "video", "film"]) {
+        icon::VIDEO
+    } else if has(&["navidrome", "music"]) {
+        icon::MUSIC
+    } else if has(&["kavita", "ebook", "comic"]) {
+        icon::EBOOK
+    } else {
+        icon::SERVER
+    }
+}
+
+/// The footer button and the dialog behind it: what is installed, as `kit status` lists it, without
+/// the container services (those have logins and are in the launcher).
+fn render_providers(state: &State) -> String {
+    let mut rows = String::new();
+    let mut total = 0;
+    let mut count = 0;
+    for r in state.packages.values().filter(|r| r.service.is_none()) {
+        let size = r.size_bytes();
+        total += size;
+        count += 1;
+        rows.push_str(&format!(
+            "<tr><td>{}</td><td class=\"num\">{}</td><td>{}</td><td class=\"num\">{}</td><td>{}</td></tr>\n",
+            esc(&r.name),
+            if size == 0 {
+                "-".to_string()
+            } else {
+                format_bytes(size)
+            },
+            esc(r.version.as_deref().unwrap_or("-")),
+            format_utc(r.installed_at),
+            esc(&r.license),
+        ));
+    }
+    format!(
+        "  <button type=\"button\" class=\"linkbtn\" id=\"providers-open\">Data providers</button>\n\
+         <dialog class=\"providers\" id=\"providers\" aria-labelledby=\"providers-title\">\n\
+         <header><h2 id=\"providers-title\">Data providers</h2>\
+         <span class=\"sum\">{count} installed · {}</span>\
+         <button type=\"button\" class=\"btn\" data-close>Close</button></header>\n\
+         <div class=\"tablewrap\"><table class=\"table\">\n\
+         <thead><tr><th>Name</th><th>Size</th><th>Version</th><th>Installed (UTC)</th><th>Licence</th></tr></thead>\n\
+         <tbody>\n{rows}</tbody></table></div>\n</dialog>\n",
+        format_bytes(total)
+    )
+}
+
+/// Replaces `{{KEY}}` markers in one pass, so inserted text is never scanned for markers.
+fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len() + 4096);
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let hit = after.find("}}").and_then(|end| {
+            values
+                .iter()
+                .find(|(k, _)| *k == &after[..end])
+                .map(|(_, v)| (end, *v))
+        });
+        match hit {
+            Some((end, value)) => {
+                out.push_str(value);
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str("{{");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Books "Random article" draws from: every installed library, as Kiwix names them.
+fn random_books(state: &State) -> Vec<String> {
+    let mut books: Vec<String> = state
+        .packages
+        .values()
+        .filter(|r| r.kind == PackageType::Zim)
+        .filter_map(|r| Some(r.files.first()?.name.strip_suffix(".zim")?.to_string()))
+        .collect();
+    books.sort();
+    books
+}
+
+/// The launcher tiles: services, and on the front also maps and the assistant.
+fn launcher_tiles(state: &State, origin: Origin) -> String {
+    let mut tiles = String::new();
+    if matches!(origin, Origin::File(_)) {
+        tiles.push_str(&tile(icon::LIBRARY, "Library", &format!("{}/", base_of(origin))));
+    }
     for (r, sv) in state.services() {
         let href = match origin {
             Origin::File(_) => format!("http://127.0.0.1:{}/", sv.port),
             Origin::Front { .. } => format!("https://{}/", esc(&sv.host)),
         };
-        items.push_str(&format!(
-            "    <li><a href=\"{href}\"><strong>{}</strong></a> (service)<br>\
-             <small>{} · licence {} · login: run <code>kit status</code></small></li>\n",
-            esc(&r.name),
-            esc(&sv.host),
-            esc(&r.license),
+        tiles.push_str(&tile(
+            service_icon(&format!("{} {}", r.id, r.name)),
+            // "Jellyfin (films and series)" is "Jellyfin" under its icon.
+            r.name.split(" (").next().unwrap_or(&r.name),
+            &href,
         ));
     }
-    for r in state
-        .packages
-        .values()
-        .filter(|r| r.kind == crate::catalog::PackageType::Zim)
-    {
-        let book = r
-            .files
-            .first()
-            .map(|f| f.name.strip_suffix(".zim").unwrap_or(&f.name).to_string())
-            .unwrap_or_default();
-        let href = match origin {
-            Origin::File(_) => format!("{base}/viewer#{}", esc(&book)),
-            Origin::Front { .. } => format!("/content/{}", esc(&book)),
-        };
-        items.push_str(&format!(
-            "    <li><a href=\"{href}\"><strong>{}</strong></a><br>\
-             <small>{} · {} · licence {} · installed {}</small></li>\n",
-            esc(&r.name),
-            format_bytes(r.size_bytes()),
-            esc(r.version.as_deref().unwrap_or("unknown version")),
-            esc(&r.license),
-            format_utc(r.installed_at),
-        ));
+    if matches!(origin, Origin::Front { .. }) && !state.maps().is_empty() {
+        tiles.push_str(&tile(icon::MAP, "Maps", "/maps/"));
     }
-    let games = format!(
-        "{}{}{}",
-        render_assistant(state, origin),
-        render_maps(state, origin),
-        render_apps(state)
-    );
-    if items.is_empty() && games.is_empty() {
-        items.push_str("    <li>Nothing installed yet.</li>\n");
+    if matches!(origin, Origin::Front { .. }) && !state.models().is_empty() {
+        tiles.push_str(&tile(icon::ASSISTANT, "Assistant", "/ai/"));
     }
-    let mut quick = String::new();
-    for (label, terms) in EMERGENCY_SEARCHES {
-        quick.push_str(&format!(
-            "    <li><a href=\"{base}/search?pattern={}\">{}</a></li>\n",
-            url_encode(terms),
-            esc(label)
-        ));
+    tiles
+}
+
+fn base_of(origin: Origin) -> String {
+    match origin {
+        Origin::File(port) => format!("http://localhost:{port}"),
+        Origin::Front { .. } => String::new(),
     }
-    format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Offline kit</title>\n<style>\n\
-         :root {{ color-scheme: light dark; font-family: system-ui, sans-serif; }}\n\
-         body {{ max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }}\n\
-         li {{ margin: 0.8rem 0; }}\n\
-         form {{ display: flex; gap: 0.5rem; }} input[type=search] {{ flex: 1; font-size: 1.2rem; padding: 0.4rem; }}\n\
-         button {{ font-size: 1.1rem; padding: 0.4rem 1rem; }}\n\
-         .quick {{ columns: 2; list-style: none; padding: 0; }}\n</style>\n</head>\n<body>\n\
-         <h1>Offline kit</h1>\n<p>{title_note} <a href=\"{base}/\">Open the full library</a>.</p>\n\
-         <form action=\"{base}/search\" method=\"get\">\n\
-         <input type=\"search\" name=\"pattern\" placeholder=\"Search everything installed\" autofocus required>\n\
-         <button type=\"submit\">Search</button>\n</form>\n\
-         <h2>Emergency</h2>\n<ul class=\"quick\">\n{quick}</ul>\n\
-         <p><small>Emergency numbers: 112 (EU) · 110 police (DE) · 911 (US/CA)</small></p>\n\
-         <h2>Installed content</h2>\n<ul>\n{items}</ul>\n{games}</body>\n</html>\n"
+}
+
+/// `read.html`: the Blackout header above an article, which is shown in a frame. The front links
+/// every article through it (`/read.html#/content/<book>/<path>`), so the way back is always there.
+pub fn render_read(state: &State) -> String {
+    let tiles = launcher_tiles(state, Origin::Front { host: PORTAL_HOST });
+    fill(
+        READ,
+        &[
+            ("CSS", CSS),
+            ("THEME_JS", THEME_JS),
+            ("COMMON_JS", COMMON_JS),
+            ("LAUNCHER", &tiles),
+            ("LAUNCHER_HIDDEN", if tiles.is_empty() { " hidden" } else { "" }),
+        ],
     )
 }
 
-/// Installed map regions. The viewer needs range requests, which only the HTTPS front serves.
-fn render_maps(state: &State, origin: Origin) -> String {
-    let maps = state.maps();
-    if maps.is_empty() {
-        return String::new();
-    }
-    let mut out = String::from("<h2>Maps</h2>\n<ul>\n");
-    for (r, _) in maps {
-        let detail = format!(
-            "{} · licence {} · map data © OpenStreetMap contributors",
-            format_bytes(r.size_bytes()),
-            esc(&r.license)
-        );
-        match origin {
-            Origin::Front { .. } => out.push_str(&format!(
-                "    <li><a href=\"/maps/\"><strong>{}</strong></a><br><small>{detail}</small></li>\n",
-                esc(&r.name)
-            )),
-            Origin::File(_) => out.push_str(&format!(
-                "    <li><strong>{}</strong><br><small>{detail} · open it at https://{PORTAL_HOST}/maps/ \
-                 after <code>kit net enable</code></small></li>\n",
-                esc(&r.name)
-            )),
-        }
-    }
-    out.push_str("</ul>\n");
-    out
+/// `results.html`: the search results in the portal's look, filled in by the browser from the
+/// Kiwix search on the same origin. Only the front serves it.
+pub fn render_results(state: &State) -> String {
+    let tiles = launcher_tiles(state, Origin::Front { host: PORTAL_HOST });
+    fill(
+        RESULTS,
+        &[
+            ("CSS", CSS),
+            ("THEME_JS", THEME_JS),
+            ("COMMON_JS", COMMON_JS),
+            ("LAUNCHER", &tiles),
+            ("LAUNCHER_HIDDEN", if tiles.is_empty() { " hidden" } else { "" }),
+            ("PROVIDERS", &render_providers(state)),
+        ],
+    )
 }
 
-/// Local programs (Flatpak), one list per group. A web page cannot start programs, so each entry
-/// names the desktop menu and the command.
-fn render_apps(state: &State) -> String {
-    let apps = state.apps();
-    if apps.is_empty() {
-        return String::new();
-    }
-    let mut out = String::from(
-        "<h2>Games and programs</h2>\n<p><small>These run on this computer, not in the browser: \
-         open them from the desktop menu or run the command shown.</small></p>\n",
-    );
-    for (key, heading) in APP_GROUPS {
-        let in_group: Vec<_> = apps.iter().filter(|(_, a)| a.group == *key).collect();
-        if in_group.is_empty() {
-            continue;
-        }
-        out.push_str(&format!("<h3>{}</h3>\n<ul>\n", esc(heading)));
-        for (r, a) in in_group {
-            out.push_str(&format!(
-                "    <li><strong>{}</strong><br><small>licence {} · <code>flatpak run {}</code></small></li>\n",
-                esc(&r.name),
-                esc(&r.license),
-                esc(&a.app_id),
-            ));
-        }
-        out.push_str("</ul>\n");
-    }
-    out
+pub fn render_page(state: &State, origin: Origin) -> String {
+    let (base, host, note) = match origin {
+        Origin::File(port) => (
+            format!("http://localhost:{port}"),
+            format!("localhost:{port}"),
+            format!(
+                "<p class=\"note\">Installed content, served locally by Kiwix. \
+                 <a href=\"http://localhost:{port}/\">Open the full library</a>.</p>\n"
+            ),
+        ),
+        Origin::Front { host } => (String::new(), esc(host), String::new()),
+    };
+    let tiles = launcher_tiles(state, origin);
+    // The front shows results in the portal's own page; the file version has only Kiwix's.
+    let (action, field) = match origin {
+        Origin::File(_) => (format!("{base}/search"), "pattern"),
+        Origin::Front { .. } => ("/results.html".to_string(), "q"),
+    };
+    // The link works as is (first book); the page script picks a book and adds a nonce per click,
+    // so neither the book nor a cached redirect repeats.
+    let prefix = match origin {
+        Origin::File(_) => base.clone(),
+        Origin::Front { .. } => "/read.html#".to_string(),
+    };
+    let books = random_books(state);
+    let random = books
+        .first()
+        .map(|first| {
+            let all: Vec<String> = books.iter().map(|b| url_encode(b)).collect();
+            format!(
+                "      <a class=\"btn\" id=\"random\" href=\"{prefix}/random?content={}\" data-prefix=\"{prefix}\" data-books=\"{}\">Random article</a>\n",
+                url_encode(first),
+                all.join(",")
+            )
+        })
+        .unwrap_or_default();
+    fill(
+        PAGE,
+        &[
+            ("CSS", CSS),
+            ("THEME_JS", THEME_JS),
+            ("COMMON_JS", COMMON_JS),
+            ("HOST", &host),
+            ("ACTION", &action),
+            ("FIELD", field),
+            ("LAUNCHER", &tiles),
+            ("LAUNCHER_HIDDEN", if tiles.is_empty() { " hidden" } else { "" }),
+            ("PROVIDERS", &render_providers(state)),
+            ("RANDOM", &random),
+            ("NOTE", &note),
+        ],
+    )
 }
 
 /// Percent-encodes everything but unreserved characters; space becomes `+`.
@@ -272,30 +378,6 @@ fn survival_books(state: &State) -> Vec<String> {
         .collect();
     books.sort();
     books
-}
-
-/// The assistant entry. The page needs the HTTPS front (it talks to Kiwix and Ollama on one origin).
-fn render_assistant(state: &State, origin: Origin) -> String {
-    let models = state.models();
-    let Some((r, m)) = models.first() else {
-        return String::new();
-    };
-    let detail = format!(
-        "{} · licence {} · answers only from the library, with the passages shown",
-        esc(&m.name),
-        esc(&r.license)
-    );
-    let entry = match origin {
-        Origin::Front { .. } => format!(
-            "    <li><a href=\"/ai/\"><strong>Ask the assistant</strong></a><br><small>{detail}</small></li>\n"
-        ),
-        Origin::File(_) => format!(
-            "    <li><strong>Assistant</strong><br><small>{detail} · open it at https://{PORTAL_HOST}/ai/ \
-             after <code>kit net enable</code>; in a terminal: <code>ollama run {}</code></small></li>\n",
-            esc(&m.name)
-        ),
-    };
-    format!("<h2>Assistant</h2>\n<ul>\n{entry}</ul>\n")
 }
 
 const VIEWER: &str = include_str!("../../assets/maps/viewer.html");
@@ -396,6 +478,8 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     }
     fs::create_dir_all(&dir).map_err(io_err("cannot create", &dir))?;
     write_atomic(&dir.join("index.html"), &render_index(state))?;
+    write_atomic(&dir.join("results.html"), &render_results(state))?;
+    write_atomic(&dir.join("read.html"), &render_read(state))?;
     write_atomic(
         &dir.join(FRONT_PAGE),
         &render_page(state, Origin::Front { host: PORTAL_HOST }),
@@ -418,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn index_lists_packages_with_links() {
+    fn index_links_to_kiwix_and_lists_no_content() {
         let mut st = State {
             port: Some(7000),
             ..State::default()
@@ -426,11 +510,15 @@ mod tests {
         st.packages
             .insert("a".into(), sample_record("a", "wiki_2026-10.zim", 18_585_337_585));
         let html = render_index(&st);
-        assert!(
-            html.contains("http://localhost:7000/viewer#wiki_2026-10"),
-            "{html}"
+        // The package is listed only in the providers dialog, not on the page itself.
+        let page = html.replace(
+            &html[html.find("<dialog").unwrap()..html.find("</dialog>").unwrap()],
+            "",
         );
-        assert!(html.contains("Package a") && html.contains("18.6 GB") && html.contains("CC-BY-SA-4.0"));
+        assert!(
+            !page.contains("<h2>Installed content") && !page.contains("Package a"),
+            "{page}"
+        );
         assert!(html.contains("http://localhost:7000/\">Open the full library"));
     }
 
@@ -440,51 +528,87 @@ mod tests {
         st.packages
             .insert("a".into(), sample_record("a", "wiki_2026-10.zim", 1));
         let html = render_page(&st, Origin::Front { host: "kit.local" });
-        assert!(html.contains("href=\"/content/wiki_2026-10\""), "{html}");
         assert!(
-            html.contains("<form action=\"/search\" method=\"get\">") && html.contains("name=\"pattern\"")
+            !html.contains("/content/wiki_2026-10\""),
+            "no content list on the home page"
+        );
+        assert!(
+            html.contains("href=\"/read.html#/random?content=wiki_2026-10"),
+            "{html}"
+        );
+        assert!(
+            !render_index(&st).contains("/read.html"),
+            "the file version has no frame page"
+        );
+        assert!(
+            html.contains("<form class=\"search\" action=\"/results.html\" method=\"get\">")
+                && html.contains("name=\"q\"")
         );
         assert!(!html.contains("localhost"));
-        assert!(html.contains("/search?pattern=first+aid+Erste+Hilfe"));
-        assert!(
-            html.contains("Unterk%C3%BChlung"),
-            "non-ASCII terms are percent-encoded"
-        );
-    }
-
-    fn app(id: &str, name: &str, app_id: &str, group: &str) -> super::super::state::Record {
-        let mut r = sample_record(id, "x", 1);
-        r.name = name.into();
-        r.kind = crate::catalog::PackageType::Flatpak;
-        r.files.clear();
-        r.app = Some(super::super::state::AppRecord {
-            app_id: app_id.into(),
-            group: group.into(),
-            by_kit: true,
-        });
-        r
     }
 
     #[test]
-    fn games_are_listed_per_group_with_their_command() {
+    fn providers_dialog_lists_packages_but_not_services() {
         let mut st = State::default();
-        for (id, name, app_id, group) in [
-            ("luanti", "Luanti", "org.luanti.luanti", "sandbox"),
-            ("zeroad", "0 A.D.", "com.play0ad.zeroad", "strategy"),
-            ("wesnoth", "Wesnoth", "org.wesnoth.Wesnoth", "strategy"),
-        ] {
-            st.packages.insert(id.into(), app(id, name, app_id, group));
-        }
+        let mut z = sample_record("wiki", "wiki_2026-10.zim", 18_585_337_585);
+        z.name = "Wiki <b>".into();
+        st.packages.insert("wiki".into(), z);
+        let mut sv = sample_record("jelly", "x", 1);
+        sv.name = "Jellyfin".into();
+        sv.service = Some(super::super::state::ServiceRecord {
+            host: "jelly.kit.local".into(),
+            port: 8096,
+            unit: "j.service".into(),
+            image: "x".into(),
+        });
+        st.packages.insert("jelly".into(), sv);
         for html in [
             render_index(&st),
             render_page(&st, Origin::Front { host: "kit.local" }),
+            render_results(&st),
         ] {
-            let strategy = html.find("Strategy and simulation").expect(&html);
-            let sandbox = html.find("Sandbox").expect(&html);
-            assert!(strategy < sandbox, "groups follow the fixed order");
-            assert!(html.contains("<code>flatpak run com.play0ad.zeroad</code>"));
-            assert!(!html.contains("Nothing installed yet"));
-            assert!(!html.contains("Arcade"), "empty groups are not shown");
+            let dialog = &html[html.find("<dialog").expect(&html)..html.find("</dialog>").unwrap()];
+            assert!(
+                dialog.contains("Wiki &lt;b&gt;") && dialog.contains("18.6 GB"),
+                "{dialog}"
+            );
+            assert!(
+                dialog.contains("CC-BY-SA-4.0") && dialog.contains("1 installed"),
+                "{dialog}"
+            );
+            assert!(!dialog.contains("Jellyfin"), "services are not data providers");
+        }
+    }
+
+    #[test]
+    fn every_page_has_the_theme_script_and_toggle() {
+        let st = State::default();
+        for html in [
+            render_index(&st),
+            render_page(&st, Origin::Front { host: "kit.local" }),
+            render_results(&st),
+            render_read(&st),
+        ] {
+            assert!(
+                html.contains("window.kitTheme") && html.contains("id=\"theme-toggle\""),
+                "{html}"
+            );
+            assert!(html.contains(":root[data-theme=dark]") && !html.contains("{{"));
+        }
+    }
+
+    #[test]
+    fn both_pages_keep_their_footer() {
+        let st = State::default();
+        for html in [
+            render_index(&st),
+            render_page(&st, Origin::Front { host: "kit.local" }),
+            render_results(&st),
+        ] {
+            assert!(
+                html.contains("<footer>") && html.contains("</footer>\n</div>"),
+                "{html}"
+            );
         }
     }
 
@@ -498,16 +622,21 @@ mod tests {
         let mut st = State::default();
         let mut r = sample_record("a", "a.zim", 1);
         r.name = "<script>alert(1)</script> & co".into();
+        r.service = Some(super::super::state::ServiceRecord {
+            host: "a.kit.local".into(),
+            port: 9000,
+            unit: "a.service".into(),
+            image: "x".into(),
+        });
         st.packages.insert("a".into(), r);
         let html = render_index(&st);
-        assert!(!html.contains("<script>"));
+        assert!(!html.contains("<script>alert"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co"));
     }
 
     #[test]
-    fn empty_state_says_so_and_default_port_is_used() {
+    fn default_port_is_used_without_state() {
         let html = render_index(&State::default());
-        assert!(html.contains("Nothing installed yet"));
         assert!(html.contains(&format!("localhost:{DEFAULT_PORT}")));
     }
 
@@ -519,6 +648,18 @@ mod tests {
         st.packages.insert("a".into(), sample_record("a", "a.zim", 1));
         write(&p, &st).unwrap();
         assert!(p.portal_dir().join("kit.html").exists());
+        let read = fs::read_to_string(p.portal_dir().join("read.html")).unwrap();
+        assert!(
+            read.contains("<iframe id=\"page\"") && read.contains("kit-dark") && !read.contains("{{"),
+            "{read}"
+        );
+        let results = fs::read_to_string(p.portal_dir().join("results.html")).unwrap();
+        assert!(results.contains("/search?pattern=") && results.contains("format=xml"));
+        assert!(!results.contains("{{"), "every marker is filled");
+        assert!(
+            !results.contains("Installed content"),
+            "no content lists on the results page"
+        );
         assert!(p.portal_dir().join("index.html").exists() && p.portal_dir().join("installed.json").exists());
         write(&p, &State::default()).unwrap();
         assert!(!p.portal_dir().exists());
@@ -526,7 +667,7 @@ mod tests {
     }
 
     #[test]
-    fn maps_link_to_the_viewer_on_the_front_only() {
+    fn maps_are_in_the_launcher_on_the_front_only_and_described_for_the_viewer() {
         let mut st = State::default();
         let mut r = sample_record("map_x", "map_x.pmtiles", 1_000_000);
         r.name = "Map X".into();
@@ -537,15 +678,8 @@ mod tests {
         });
         st.packages.insert("map_x".into(), r);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
-        assert!(
-            front.contains("<h2>Maps</h2>") && front.contains("href=\"/maps/\""),
-            "{front}"
-        );
-        let file = render_index(&st);
-        assert!(
-            file.contains("kit net enable") && !file.contains("href=\"/maps/\""),
-            "{file}"
-        );
+        assert!(front.contains("href=\"/maps/\""), "{front}");
+        assert!(!render_index(&st).contains("href=\"/maps/\""));
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
         let regions = render_regions(&paths, &st);
@@ -598,15 +732,8 @@ mod tests {
         st.packages.insert(other.id.clone(), other);
         assert_eq!(survival_books(&st), ["ready.gov_en_all_2026-10"]);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
-        assert!(
-            front.contains("<h2>Assistant</h2>") && front.contains("href=\"/ai/\""),
-            "{front}"
-        );
-        let file = render_index(&st);
-        assert!(
-            file.contains("ollama run granite4.2:3b") && !file.contains("href=\"/ai/\""),
-            "{file}"
-        );
+        assert!(front.contains("href=\"/ai/\""), "{front}");
+        assert!(!render_index(&st).contains("href=\"/ai/\""));
 
         st.packages
             .insert("other".into(), sample_record("other", "a.zim", 1));

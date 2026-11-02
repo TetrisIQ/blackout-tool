@@ -341,8 +341,6 @@ mod tests {
         assert_eq!(rec.kind, PackageType::Flatpak);
         assert_eq!(rec.app.as_ref().unwrap().group, "sandbox");
         assert!(rec.app.as_ref().unwrap().by_kit);
-        let html = std::fs::read_to_string(e.paths.portal_dir().join("kit.html")).unwrap();
-        assert!(html.contains("flatpak run org.luanti.luanti"));
     }
 
     #[test]

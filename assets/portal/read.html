@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackout</title>
+<script>
+{{THEME_JS}}</script>
+<style>
+{{CSS}}html, body { height: 100%; }
+.page { height: 100%; min-height: 0; }
+header { border-bottom: 1px solid var(--color-divider); }
+#page.dark { filter: invert(.9) hue-rotate(180deg); }
+#page { flex: 1; width: 100%; border: 0; background: #fff; color-scheme: light; min-height: 0; }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+  <div class="bar">
+    <a class="brand" href="/" aria-label="Blackout home">Blackout</a>
+    <form action="/results.html" method="get" style="flex:1 1 220px;max-width:640px;min-width:0">
+      <label class="pill">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="q" name="q" type="search" autocomplete="off" aria-label="Search" placeholder="Search offline" required>
+      </label>
+    </form>
+  </div>
+  <span class="tag" id="net"><i></i><b>Offline · all services local</b></span>
+  <details class="launcher" id="launcher"{{LAUNCHER_HIDDEN}}>
+    <summary aria-label="Services">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="5" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="19" cy="5" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="19" r="1"/><circle cx="12" cy="19" r="1"/><circle cx="19" cy="19" r="1"/></svg>
+    </summary>
+    <div class="panel">
+      <div class="kicker">Local services</div>
+      <div class="grid">
+{{LAUNCHER}}      </div>
+      <button type="button" class="themebtn" id="theme-toggle"><svg class="to-dark" width="14" height="14" viewBox="0 0 384 512" fill="currentColor" aria-hidden="true"><path d="M223.5 32C100 32 0 132.3 0 256S100 480 223.5 480c60.6 0 115.5-24.2 155.8-63.4c5-4.9 6.3-12.5 3.1-18.7s-10.1-9.7-17-8.5c-9.8 1.7-19.8 2.6-30.1 2.6c-96.9 0-175.5-78.8-175.5-176c0-65.8 36-123.1 89.3-153.3c6.1-3.5 9.2-10.5 7.7-17.3s-7.3-11.9-14.3-12.5c-6.3-.5-12.6-.8-19-.8z"/></svg><svg class="to-light" width="14" height="14" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true"><path d="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"/></svg><span>Dark theme</span></button>
+    </div>
+  </details>
+</header>
+<iframe id="page" title="Article" referrerpolicy="same-origin"></iframe>
+</div>
+<script>
+{{COMMON_JS}}</script>
+<script>
+(function () {
+  var frame = document.getElementById('page');
+  function target() {
+    var t = decodeURI(location.hash.slice(1));
+    // Only paths on this origin: never a full URL from the address bar.
+    return /^\/[^\/]/.test(t) ? t : '/';
+  }
+  // Dark theme for the article: the frame is inverted as a whole, pictures and video inside it are
+  // inverted back so they keep their colours.
+  var MEDIA = 'img, video, picture, canvas, iframe, object, embed';
+  var css = MEDIA.split(', ').map(function (t) { return 'html.kit-dark ' + t; }).join(', ') +
+    ' { filter: invert(1) hue-rotate(180deg); }';
+  function theme() {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    frame.classList.toggle('dark', dark);
+    try {
+      var d = frame.contentDocument;
+      if (!d || !d.head) return;
+      if (!d.getElementById('kit-dark')) {
+        var st = d.createElement('style'); st.id = 'kit-dark'; st.textContent = css; d.head.appendChild(st);
+      }
+      d.documentElement.classList.toggle('kit-dark', dark);
+    } catch (e) {}
+  }
+  new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  theme();
+  frame.src = target();
+  frame.addEventListener('load', function () {
+    theme();
+    try {
+      var w = frame.contentWindow, l = w.location;
+      history.replaceState(null, '', '#' + l.pathname + l.search + l.hash);
+      document.title = (w.document.title ? w.document.title + ' - ' : '') + 'Blackout';
+    } catch (e) {}
+  });
+  window.addEventListener('hashchange', function () {
+    var l = frame.contentWindow.location;
+    if (target() !== l.pathname + l.search + l.hash) frame.contentWindow.location.replace(target());
+  });
+})();
+</script>
+</body>
+</html>
