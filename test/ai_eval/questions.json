@@ -1,0 +1,221 @@
+[
+ {
+  "id": "burn-minor",
+  "question": "How do I treat a minor burn?",
+  "facts": [
+   "cool(ing)?,? (running )?water|cold (running )?water|running water",
+   "10|15|20 minutes"
+  ],
+  "forbid": [
+   "butter",
+   "toothpaste",
+   "\\bice\\b",
+   "ointment"
+  ]
+ },
+ {
+  "id": "burn-minor-de",
+  "question": "Wie behandle ich eine leichte Verbrennung?",
+  "facts": [
+   "cool|cold|running water"
+  ],
+  "answer": [
+   "k(ü|ue)hl|kalt|flie(ß|ss)end"
+  ],
+  "forbid": [
+   "butter",
+   "zahnpasta",
+   "\\beis\\b"
+  ]
+ },
+ {
+  "id": "water-boil",
+  "question": "How long do I boil water to make it safe to drink?",
+  "facts": [
+   "1 minute|one minute",
+   "3 minutes|three minutes|2,?000"
+  ]
+ },
+ {
+  "id": "water-boil-de",
+  "question": "Wie mache ich Wasser trinkbar?",
+  "facts": [
+   "boil"
+  ],
+  "answer": [
+   "abkoch|koch|filter|desinfi"
+  ]
+ },
+ {
+  "id": "water-per-person",
+  "question": "How much drinking water should I store per person?",
+  "facts": [
+   "one gallon|1 gallon",
+   "per day|each day|daily"
+  ]
+ },
+ {
+  "id": "fridge-outage",
+  "question": "How long does food in the fridge stay safe during a power outage?",
+  "facts": [
+   "4 hours|four hours"
+  ]
+ },
+ {
+  "id": "freezer-outage",
+  "question": "How long does food in a full freezer stay frozen without power?",
+  "facts": [
+   "48 hours"
+  ]
+ },
+ {
+  "id": "generator-co",
+  "question": "Where may I run a generator during a power outage?",
+  "facts": [
+   "carbon monoxide",
+   "outside|outdoors|away from"
+  ],
+  "forbid": [
+   "inside (your|the) (home|house|garage)"
+  ],
+  "answer": [
+   "outside|outdoors",
+   "away|feet"
+  ]
+ },
+ {
+  "id": "hypothermia",
+  "question": "How do I treat someone with hypothermia?",
+  "facts": [
+   "warm (drinks|clothing|blankets)|wet clothing|dry"
+  ],
+  "forbid": [
+   "alcohol",
+   "hot bath"
+  ]
+ },
+ {
+  "id": "heat-exhaustion",
+  "question": "What should I do for heat exhaustion?",
+  "facts": [
+   "cool|shade|air.?condition",
+   "water|fluids"
+  ]
+ },
+ {
+  "id": "earthquake",
+  "question": "What should I do during an earthquake?",
+  "facts": [
+   "drop",
+   "cover",
+   "hold on"
+  ]
+ },
+ {
+  "id": "flood-drive",
+  "question": "Is it safe to drive through flood water?",
+  "facts": [
+   "turn around|don.t drown|never drive|do not drive|avoid"
+  ],
+  "forbid": [
+   "is safe to drive"
+  ]
+ },
+ {
+  "id": "diarrhea",
+  "question": "What helps against travellers' diarrhoea?",
+  "facts": [
+   "rehydrat|fluids|oral"
+  ],
+  "known": "British spelling: the CDC pages say 'diarrhea', the search does not match 'diarrhoea'"
+ },
+ {
+  "id": "canning-lowacid",
+  "question": "How do I safely can low-acid vegetables?",
+  "facts": [
+   "pressure (canner|canning)"
+  ],
+  "forbid": [
+   "boiling.water (bath )?canner is (enough|safe)"
+  ],
+  "known": "the USDA ZIM has no searchable text (only a home page), so no source answers this"
+ },
+ {
+  "id": "paracetamol",
+  "question": "What is the maximum daily dose of paracetamol for an adult?",
+  "facts": [
+   "8 tablets|4 ?g\\b|4,?000 ?mg"
+  ],
+  "forbid": []
+ },
+ {
+  "id": "cpr",
+  "question": "How fast should chest compressions be during CPR?",
+  "facts": [
+   "100",
+   "120"
+  ]
+ },
+ {
+  "id": "choking",
+  "question": "How do I help an adult who is choking?",
+  "facts": [
+   "back blows|abdominal thrusts|heimlich|chest thrusts"
+  ],
+  "answer": [
+   "thrust|heimlich|back blow|pressure"
+  ]
+ },
+ {
+  "id": "shock-signs",
+  "question": "What are signs of shock after an injury?",
+  "facts": [
+   "pale|clammy|cold",
+   "pulse|breath"
+  ]
+ },
+ {
+  "id": "tsunami",
+  "question": "What should I do after a tsunami warning?",
+  "facts": [
+   "higher ground|inland|move"
+  ]
+ },
+ {
+  "id": "wound-bleeding",
+  "question": "How do I stop heavy bleeding?",
+  "facts": [
+   "pressure|direct pressure"
+  ]
+ },
+ {
+  "id": "power-line",
+  "question": "How far must I stay from a downed power line?",
+  "facts": [
+   "downed|fallen|power line"
+  ],
+  "forbid": [
+   "\\b\\d+ (feet|ft|metres|meters|m)\\b"
+  ]
+ },
+ {
+  "id": "none-worldcup",
+  "question": "Who won the 2018 football World Cup?",
+  "none": true
+ },
+ {
+  "id": "none-docker",
+  "question": "How do I install Docker on Windows?",
+  "none": true
+ },
+ {
+  "id": "none-pizza",
+  "question": "What is a good recipe for pizza dough?",
+  "none": true
+ },
+ {
+  "id": "none-everest-de",
+  "question": "Wie hoch ist der Mount Everest?",
+  "none": true
+ }
+]

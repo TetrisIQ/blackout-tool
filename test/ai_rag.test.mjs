@@ -25,7 +25,8 @@ assert.ok(picked.includes('Cooling a burn') && !picked.includes('mirrors'), pick
 assert.ok(R.pickPassage(article, 'zzzz', 90).startsWith('Introduction'), 'no hit: article start');
 assert.ok(R.pickPassage(article, 'burn', 200).length <= 200);
 
-assert.equal(R.cleanKeywords('Burn first aid, water!\nSure', 'x y'), 'burn first aid water sure');
+assert.equal(R.cleanKeywords('Burn first aid, water!\nSure', 'x y'), 'burn water sure');
+assert.equal(R.cleanKeywords('first aid', 'x y'), 'first aid');
 assert.equal(R.cleanKeywords('', 'Wie behandle ich eine Verbrennung?'), 'behandle verbrennung');
 assert.equal(R.cleanKeywords('ok', 'Wie behandle ich eine Verbrennung?'), 'behandle verbrennung');
 
@@ -39,9 +40,9 @@ assert.deepEqual(
   ['Pacman', 'Mirrors', 'Mercury (element)', 'Mercury (planet)'],
 );
 
-assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b']);
-assert.deepEqual(R.queryLadder('a b c d'), ['a b c d', 'a b c', 'a b d', 'a c d', 'b c d', 'a b']);
-assert.deepEqual(R.queryLadder('a b c'), ['a b c', 'a b', 'a c', 'b c']);
+assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b', 'a']);
+assert.deepEqual(R.queryLadder('a b c d'), ['a b c d', 'a b c', 'a b d', 'a c d', 'b c d', 'a b', 'a']);
+assert.deepEqual(R.queryLadder('a b c'), ['a b c', 'a b', 'a c', 'b c', 'a']);
 
 // One hit per title (the original, not the translated copy), then title/snippet matches first.
 const h = (title, href, snippet = '') => ({ title, href, snippet });

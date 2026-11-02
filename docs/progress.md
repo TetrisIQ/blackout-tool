@@ -237,3 +237,18 @@ Found by the first real install of the test profile: no login, no library.
 
 ### Caveats
 - Still weak: questions whose pages use other words (downed power line, earthquake: nothing relevant is found or the passages are off-topic) and an unrelated passage can still pass the half-the-keywords filter (a ketoconazole side-effects page was shown under the burn answer). The next step is the evaluation set (questions with expected facts, and ones that must answer "not found") so these can be measured instead of spot-checked.
+
+## Phase 7 - seventh slice: evaluation set for the assistant, keyword and ranking changes
+- **`node test/ai_eval.mjs`** (opt-in; needs the running kiwix-serve and Ollama of a real install, changes nothing): runs the page's own pipeline (keywords, `Rag.retrieve`, answer; prompts and Ollama options are shared through `Rag.OPTIONS`) on the 25 questions in `test/ai_eval/questions.json` and checks three things per question: do the retrieved passages contain the expected facts (regular expressions), does the answer state them without forbidden advice (negated sentences such as "do not apply butter" are skipped), and for 4 questions the library cannot answer, is nothing found or does the answer say so. Options: `--model`, `--only id,id`, `--retrieval-only`, `--show`, `--json file`. Exit code 1 on any failure except cases with a `known` reason (library gaps, listed but not counted). The facts were checked against the installed ZIMs (the retrieval check is literally "the text is in the passage").
+- **Retrieval changes made with it:** the keyword prompt asks for the subject named like an article title, without generic words (emergency, treatment, first aid ...), and the same words are dropped from the model's output; the question's own content words are searched as a second source; the first keyword alone is a last search for 3+ keywords; shorter titles rank slightly higher; one failing search (Kiwix answers 500 for odd strings) no longer loses the others.
+- **Baseline (survival ZIMs, one run each, answers vary by a question or two between runs):**
+
+| model | all checks pass | retrieval ok | answers ok |
+|---|---|---|---|
+| qwen3.5:4b | 14 of 25 | 16 | 15 |
+| qwen3.5:9b | 16 of 25 | 20 | 16 |
+
+  (granite4.2:3b was started too but most of its run failed with errors, not a quality result; not repeated.)
+- **What the failures show:** (1) Retrieval is the main limit: CPR, wound bleeding (answered with *menstrual* bleeding), shock, the German burn/water questions retrieve the wrong pages because Kiwix needs every term and the model's keywords vary. (2) **Wrong-source answers are the real safety problem:** CPR was answered with "AutoPulse runs at 80 compressions per minute", bleeding with tranexamic acid; the passage filter (half of the keywords) does not catch a page about the wrong thing. (3) "How high is Mount Everest" (German) was answered with 8,848 m although no passage says so: the "answer only from the passages" instruction is not airtight with a small model. (4) When the library lacks the fact, both models mostly say so (freezer 48 hours, downed power line distance): that is the wanted behaviour.
+- **Library gaps found:** the USDA canning ZIM has no searchable text (home page only), so it adds nothing to the assistant; "diarrhoea" does not match the CDC's "diarrhea" (no spelling normalisation).
+- **Caveat on the numbers:** the retrieval changes were tuned while looking at these 25 questions, so they are optimistic for new questions; the set needs to grow (and a held-out part be kept) before the numbers are used as a release gate. Nothing here is a clinical evaluation.

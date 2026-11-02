@@ -85,7 +85,7 @@
   async function keywords(question) {
     try {
       const r = await chat({ stream: false, messages: Rag.keywordMessages(question),
-                             options: { temperature: 0, num_predict: 24, num_ctx: 8192 } });
+                             options: Rag.OPTIONS.keywords });
       return Rag.cleanKeywords((await r.json()).message.content, question);
     } catch (e) {
       return Rag.cleanKeywords('', question);
@@ -93,7 +93,7 @@
   }
 
   // `query` is the English keyword string: the library is English, the question may not be.
-  const passages = (query) => Rag.retrieve(query, async (url) => (await fetch(url)).text(), books);
+  const passages = (query, question) => Rag.retrieve(query, async (url) => (await fetch(url)).text(), books, { question });
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -117,7 +117,7 @@
     log.append(turn);
     try {
       const query = await keywords(question);
-      const { found, used } = await passages(query);
+      const { found, used } = await passages(query, question);
       tSearch = performance.now();
       if (found.length === 0) {
         status.textContent = '';
@@ -135,7 +135,7 @@
       });
       const resp = await chat({ stream: true, messages: Rag.buildMessages(question, found, history),
                                 think: reasoning,
-                                options: { temperature: 0.2, num_ctx: 8192, num_predict: reasoning ? 3000 : 700 } });
+                                options: reasoning ? Rag.OPTIONS.reasoning : Rag.OPTIONS.answer });
       if (!resp.ok) throw new Error('assistant answered ' + resp.status);
       const reader = resp.body.getReader();
       const dec = new TextDecoder();

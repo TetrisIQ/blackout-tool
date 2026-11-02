@@ -50,7 +50,8 @@
   }
 
   const STOP = new Set(('the a an and or of to in on for with is are was be how do does i you my what when where why can ' +
-    'der die das und oder zu in auf für mit ist sind wie was wann wo warum kann ich du mein eine ein').split(' '));
+    'der die das und oder zu in auf für mit ist sind wie was wann wo warum kann ich du mein eine ein ' +
+    'may should would could does did during after before about there their them this that from into stop').split(' '));
 
   function terms(q) {
     return (q.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).filter((w) => !STOP.has(w));
@@ -98,7 +99,7 @@
   }
 
   // The search needs all terms to occur, so a long list finds nothing. Order of tries: the full list, with up to
-  // 4 terms every list that leaves one term out (last ones first), then the first 3 and the first 2 terms.
+  // 4 terms every list that leaves one term out (last ones first), then the first 3, the first 2 and the first term.
   function queryLadder(query) {
     const w = query.split(' ').filter(Boolean);
     const out = [w.join(' ')];
@@ -106,6 +107,7 @@
       for (let drop = w.length - 1; drop >= 0; drop--) out.push(w.filter((_, i) => i !== drop).join(' '));
     }
     out.push(w.slice(0, 3).join(' '), w.slice(0, 2).join(' '));
+    if (w.length >= 3) out.push(w[0]);
     return [...new Set(out)].filter((q) => q.length > 0);
   }
 
@@ -135,11 +137,16 @@
   // title and snippet mention (the engine's rank within a list breaks ties). Every book is searched on its
   // own, because one big book such as the Wikipedia medicine extract would otherwise fill the list and hide
   // Ready.gov or CDC; no book contributes more than `perBook` pages.
-  async function candidates(query, get, books, o) {
+  async function candidates(query, extra, get, books, o) {
     const names = books && books.length > 0 ? books : [null];
-    const lists = await Promise.all(queryLadder(query).flatMap((q) => names.map(async (b) => {
+    const lists = await Promise.all([...new Set([...queryLadder(query), ...extra.flatMap(queryLadder)])].flatMap((q) => names.map(async (b) => {
       const scope = b ? '&books.name=' + encodeURIComponent(b) : '';
-      const xml = await get('/search?format=xml&pageLength=' + o.pageLength + '&pattern=' + encodeURIComponent(q) + scope);
+      let xml = '';
+      try {
+        xml = await get('/search?format=xml&pageLength=' + o.pageLength + '&pattern=' + encodeURIComponent(q) + scope);
+      } catch (e) {
+        // One failed search (kiwix answers 500 for some odd strings) must not lose the others.
+      }
       return dedupeTitles(dropVariants(parseSearch(xml))).map((item, n) => ({ item, n, book: b || item.href.split('/')[2] }));
     })));
     const best = new Map();
@@ -147,35 +154,28 @@
       const k = x.item.href;
       if (!best.has(k) || x.n < best.get(k).n) best.set(k, x);
     }
-    const score = (x) => 2 * coverage(x.item.title, query) + coverage(x.item.title + ' ' + x.item.snippet, query) - 0.05 * x.n;
+    const all = [query, ...extra].join(' ');
+    const score = (x) => 2 * coverage(x.item.title, all) + coverage(x.item.title + ' ' + x.item.snippet, all) - 0.05 * x.n -
+      0.03 * x.item.title.replace(/\|.*$/, '').split(/\s+/).length;
     const ranked = [...best.values()].sort((a, b) => score(b) - score(a));
     const used = {};
     return ranked.filter((x) => (used[x.book] = (used[x.book] || 0) + 1) <= o.perBook).slice(0, o.hits).map((x) => x.item);
   }
 
-  // Passages for a keyword string. `get(url)` resolves to the response body text (the page passes fetch).
-  // Returns `{found: [{title, href, text}], used}`; `used` is the keyword string, for the "nothing found" notice.
-  async function retrieve(query, get, books, opts) {
-    const o = Object.assign({ hits: 4, perBook: 2, chars: 1400, pageLength: 6 }, opts);
-    const out = [];
-    for (const h of await candidates(query, get, books, o)) {
-      try {
-        out.push({ title: h.title, href: h.href, text: pickPassage(htmlToText(await get(h.href)), query, o.chars) });
-      } catch (e) {
-        out.push({ title: h.title, href: h.href, text: h.snippet });
-      }
-    }
-    // Keep passages that mention at least half of the keywords (title included).
-    return { found: out.filter((p) => p.text.length > 0 && coverage(p.title + ' ' + p.text, query) >= 0.5), used: query };
-  }
+  // Words that say "this is a question about help" and never occur as the subject of a page; they only dilute the
+  // search (every term has to occur) and the ranking.
+  const FILLER = new Set(('emergency medical treatment treat treating guidelines guideline procedures procedure tips safety first aid ' +
+    'symptoms prevention methods steps advice instructions information best practices what how').split(' '));
 
   function keywordMessages(question) {
     return [
       {
         role: 'system',
         content:
-          'Turn the question into exactly 3 or 4 English search keywords for an encyclopedia, most important first. ' +
-          'Always use English words, even if the question is in another language. ' +
+          'Turn the question into 3 or 4 English search keywords for an encyclopedia: the subject itself, named as an ' +
+          'article title would name it, most important first. Leave out generic words like emergency, medical, ' +
+          'treatment, safety, first aid, guide. Always use English words, even if the question is in another language. ' +
+          'Examples: "How do I get rid of head lice?" -> head lice. "Was tun bei einem Wespenstich?" -> wasp sting. ' +
           'Answer with the keywords only, separated by spaces, no punctuation, no explanation.',
       },
       { role: 'user', content: question },
@@ -185,8 +185,35 @@
   // Model output -> a safe search string; falls back to the question itself.
   function cleanKeywords(output, question) {
     const words = (output || '').toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
-    const picked = words.slice(0, 5);
+    const subject = words.filter((w) => !FILLER.has(w));
+    const picked = (subject.length >= 2 ? subject : words).slice(0, 5);
     return picked.length >= 2 ? picked.join(' ') : terms(question).slice(0, 8).join(' ') || question;
+  }
+
+  // The question's own content words (generic words dropped), at most 4: a second way to search that does not
+  // depend on how the model chose its keywords.
+  function questionTerms(question) {
+    const w = [...new Set(terms(question).filter((t) => !FILLER.has(t)))].slice(0, 4);
+    return w.length >= 2 ? w.join(' ') : '';
+  }
+
+  // Passages for a keyword string. `get(url)` resolves to the response body text (the page passes fetch).
+  // With `opts.question` the question's own terms are searched as well. Returns `{found: [{title, href, text}],
+  // used}`; `used` is the keyword string, for the "nothing found" notice.
+  async function retrieve(query, get, books, opts) {
+    const o = Object.assign({ hits: 4, perBook: 2, chars: 1400, pageLength: 6, question: '' }, opts);
+    const extra = [questionTerms(o.question)].filter((q) => q && q !== query);
+    const all = [query, ...extra].join(' ');
+    const out = [];
+    for (const h of await candidates(query, extra, get, books, o)) {
+      try {
+        out.push({ title: h.title, href: h.href, text: pickPassage(htmlToText(await get(h.href)), all, o.chars) });
+      } catch (e) {
+        out.push({ title: h.title, href: h.href, text: h.snippet });
+      }
+    }
+    // Keep passages that mention at least half of the keywords (title included).
+    return { found: out.filter((p) => p.text.length > 0 && coverage(p.title + ' ' + p.text, query) >= 0.5), used: query };
   }
 
   const SYSTEM =
@@ -206,7 +233,14 @@
     ];
   }
 
-  const api = { retrieve, rankHits, dedupeTitles, queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
+  // Ollama options of the two calls; the page and test/ai_eval.mjs share them so the evaluation measures what runs.
+  const OPTIONS = {
+    keywords: { temperature: 0, num_predict: 24, num_ctx: 8192 },
+    answer: { temperature: 0.2, num_ctx: 8192, num_predict: 700 },
+    reasoning: { temperature: 0.2, num_ctx: 8192, num_predict: 3000 },
+  };
+
+  const api = { OPTIONS, retrieve, rankHits, dedupeTitles, queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Rag = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
