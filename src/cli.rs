@@ -949,7 +949,12 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
         // the user reinstalls (updates are Phase 10).
         return r.map.is_some() && paths.maps_dir().join(format!("{}.pmtiles", item.id)).exists();
     }
-    r.files.len() == 1 && Some(&r.files[0].sha256) == item.sha256.as_ref()
+    r.files.len() == 1
+        && Some(&r.files[0].sha256) == item.sha256.as_ref()
+        && (item.kind != crate::catalog::PackageType::Zim
+            || catalog
+                .package(&item.id)
+                .is_ok_and(|m| r.category.as_deref() == Some(m.category.as_str())))
 }
 
 fn install_input(
@@ -976,6 +981,7 @@ fn install_input(
         map: manifest.source.map.clone(),
         ollama: manifest.source.ollama.clone(),
         model_spec: manifest.model.clone(),
+        category: Some(manifest.category.clone()),
     }
 }
 
@@ -1082,6 +1088,10 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
 
     let mut notes = std::collections::BTreeSet::new();
     let mut guard = StateGuard::open(&paths)?;
+    if todo.is_empty() && !guard.packages.is_empty() {
+        // Nothing new, but the pages are derived from the state and may be from an older kit.
+        install::reconcile::reconcile(&ctx, &guard)?;
+    }
     for item in &todo {
         writeln!(out, "installing {} ...", item.id)?;
         out.flush()?;

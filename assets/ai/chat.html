@@ -52,6 +52,7 @@
   const history = [];
   let model = null;
   let thinking = false;
+  let books = [];
   const deep = document.getElementById('deep');
 
   const el = (tag, cls, text) => {
@@ -65,6 +66,7 @@
     const cfg = await (await fetch('config.json')).json();
     model = cfg.model;
     thinking = !!cfg.thinking;
+    books = cfg.books || [];
     document.getElementById('model').textContent = model;
     document.getElementById('deepbox').hidden = !thinking;
   } catch (e) {
@@ -95,7 +97,8 @@
   // Returns the passages and the search string that found them.
   async function passages(query) {
     for (const q of Rag.queryLadder(query)) {
-      const r = await fetch('/search?format=xml&pageLength=8&pattern=' + encodeURIComponent(q));
+      const scope = books.map((b) => '&books.name=' + encodeURIComponent(b)).join('');
+      const r = await fetch('/search?format=xml&pageLength=8&pattern=' + encodeURIComponent(q) + scope);
       const hits = Rag.dropVariants(Rag.parseSearch(await r.text())).slice(0, 4);
       const out = [];
       for (const h of hits) {

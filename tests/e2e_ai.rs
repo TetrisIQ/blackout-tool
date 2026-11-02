@@ -117,6 +117,7 @@ fn the_front_serves_the_assistant_and_limits_the_ollama_api() {
             version: None,
             license: "Apache-2.0".into(),
             installed_at: NOW,
+            category: None,
             files: vec![],
             service: None,
             app: None,

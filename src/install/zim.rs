@@ -39,7 +39,10 @@ fn place(source: &Path, dest: &Path) -> Result<bool, InstallError> {
 fn up_to_date(input: &InstallInput, ctx: &Ctx, state: &State) -> bool {
     let dest = ctx.paths.library_dir().join(&input.file_name);
     state.packages.get(&input.id).is_some_and(|r| {
-        r.files.len() == 1 && r.files[0].name == input.file_name && r.files[0].sha256 == input.sha256
+        r.files.len() == 1
+            && r.files[0].name == input.file_name
+            && r.files[0].sha256 == input.sha256
+            && r.category == input.category
     }) && fs::metadata(&dest).is_ok_and(|m| m.len() == input.size)
 }
 
@@ -133,6 +136,7 @@ impl Installer for ZimInstaller {
                 version: input.version.clone(),
                 license: input.license.clone(),
                 installed_at,
+                category: input.category.clone(),
                 files: vec![FileRecord {
                     name: input.file_name.clone(),
                     size: input.size,
@@ -292,6 +296,7 @@ mod tests {
                 map: None,
                 ollama: None,
                 model_spec: None,
+                category: None,
             }
         }
 

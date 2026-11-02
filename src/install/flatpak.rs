@@ -124,6 +124,7 @@ impl Installer for FlatpakInstaller {
                 version: input.version.clone(),
                 license: input.license.clone(),
                 installed_at,
+                category: None,
                 files: vec![],
                 service: None,
                 app: Some(AppRecord {
@@ -289,6 +290,7 @@ mod tests {
             map: None,
             ollama: None,
             model_spec: None,
+            category: None,
         }
     }
 

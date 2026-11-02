@@ -546,6 +546,7 @@ impl Installer for ContainerInstaller {
                 version: input.version.clone(),
                 license: input.license.clone(),
                 installed_at,
+                category: None,
                 files: vec![],
                 service: Some(ServiceRecord {
                     host: svc.host.clone(),
@@ -805,6 +806,7 @@ mod tests {
                 map: None,
                 ollama: None,
                 model_spec: None,
+                category: None,
             }
         }
     }

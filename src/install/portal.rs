@@ -7,7 +7,7 @@ use std::path::Path;
 
 use super::state::State;
 use super::{DEFAULT_PORT, Paths, io_err};
-use crate::catalog::manifest::APP_GROUPS;
+use crate::catalog::manifest::{APP_GROUPS, PackageType};
 use crate::plan::format_bytes;
 
 /// Host name of the portal behind the local HTTPS front.
@@ -252,8 +252,26 @@ fn write_assistant(state: &State, dir: &Path) -> Result<(), super::InstallError>
     write_atomic(&ai.join("rag.js"), ASSISTANT_JS)?;
     write_atomic(
         &ai.join("config.json"),
-        &serde_json::json!({ "model": model.name, "thinking": model.thinking }).to_string(),
+        &serde_json::json!({
+            "model": model.name,
+            "thinking": model.thinking,
+            "books": survival_books(state),
+        })
+        .to_string(),
     )
+}
+
+/// Book names (the file name without `.zim`, as in `/content/<name>`) of the installed survival
+/// packages: the assistant searches only these, so a travel guide cannot outrank first aid.
+fn survival_books(state: &State) -> Vec<String> {
+    let mut books: Vec<String> = state
+        .packages
+        .values()
+        .filter(|r| r.kind == PackageType::Zim && r.category.as_deref() == Some("survival"))
+        .filter_map(|r| Some(r.files.first()?.name.strip_suffix(".zim")?.to_string()))
+        .collect();
+    books.sort();
+    books
 }
 
 /// The assistant entry. The page needs the HTTPS front (it talks to Kiwix and Ollama on one origin).
@@ -547,8 +565,16 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(ai.join("config.json")).unwrap(),
-            r#"{"model":"granite4.2:3b","thinking":true}"#
+            r#"{"books":[],"model":"granite4.2:3b","thinking":true}"#
         );
+        // Only survival ZIMs are searched; Kiwix names a book after the file without its date.
+        let mut zim = sample_record("readygov_en", "ready.gov_en_all_2026-10.zim", 1);
+        zim.category = Some("survival".into());
+        let mut other = sample_record("voyage", "wikivoyage_en_all_nopic_2026-09.zim", 1);
+        other.category = Some("travel".into());
+        st.packages.insert(zim.id.clone(), zim);
+        st.packages.insert(other.id.clone(), other);
+        assert_eq!(survival_books(&st), ["ready.gov_en_all_2026-10"]);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
         assert!(
             front.contains("<h2>Assistant</h2>") && front.contains("href=\"/ai/\""),

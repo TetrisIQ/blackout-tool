@@ -154,6 +154,7 @@ impl Installer for MapInstaller {
                 version: Some(build.trim_end_matches(".pmtiles").to_string()),
                 license: input.license.clone(),
                 installed_at,
+                category: None,
                 files: vec![FileRecord {
                     name: file_name(&input.id),
                     size,
@@ -313,6 +314,7 @@ mod tests {
             }),
             ollama: None,
             model_spec: None,
+            category: None,
         }
     }
 

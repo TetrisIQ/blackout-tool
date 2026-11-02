@@ -183,6 +183,8 @@ pub struct InstallInput {
     pub ollama: Option<crate::catalog::manifest::OllamaRef>,
     /// `model` packages: what the assistant page may ask of it (reasoning).
     pub model_spec: Option<crate::catalog::manifest::ModelSpec>,
+    /// Catalog category, kept in the record so the portal can tell survival books from the rest.
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone)]

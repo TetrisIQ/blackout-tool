@@ -88,6 +88,8 @@ pub struct Record {
     pub license: String,
     /// Seconds since the Unix epoch.
     pub installed_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
     pub files: Vec<FileRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<ServiceRecord>,
@@ -253,6 +255,7 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
         version: Some("2026-10-01".into()),
         license: "CC-BY-SA-4.0".into(),
         installed_at: 1_790_000_000,
+        category: None,
         files: vec![FileRecord {
             name: file.into(),
             size,

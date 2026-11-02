@@ -121,6 +121,7 @@ impl Installer for ModelInstaller {
                 version: input.version.clone(),
                 license: input.license.clone(),
                 installed_at,
+                category: None,
                 files: vec![],
                 service: None,
                 app: None,
@@ -250,6 +251,7 @@ mod tests {
                 model: "granite4.2".into(),
                 tag: "3b".into(),
             }),
+            category: None,
             model_spec: Some(crate::catalog::manifest::ModelSpec {
                 thinking: true,
                 context_k: 128,

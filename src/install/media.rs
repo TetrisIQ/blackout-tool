@@ -179,6 +179,7 @@ impl Installer for MediaInstaller {
                 version: input.version.clone(),
                 license: input.license.clone(),
                 installed_at,
+                category: None,
                 files: vec![FileRecord {
                     name: format!("{}/{}", content.media, input.id),
                     size: input.size,
@@ -338,6 +339,7 @@ mod tests {
                 map: None,
                 ollama: None,
                 model_spec: None,
+                category: None,
             }
         }
     }
