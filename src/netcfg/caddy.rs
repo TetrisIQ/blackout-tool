@@ -218,11 +218,17 @@ pub fn render_caddyfile(spec: &CaddySpec) -> String {
     let mut services: Vec<&Service> = spec.services.iter().collect();
     services.sort_by(|a, b| a.host.cmp(&b.host));
     for sv in services {
+        // The portal shows a service under its own header, in a frame: allow exactly the portal as
+        // the parent (the services forbid every frame by default), nobody else.
         out.push_str(&format!(
             "\nhttps://{host}:{https} {{\n\
              \ttls {cert} {key}\n\
-             \treverse_proxy 127.0.0.1:{port}\n\
+             \treverse_proxy 127.0.0.1:{port} {{\n\
+             \t\theader_down -X-Frame-Options\n\
+             \t\theader_down Content-Security-Policy \"frame-ancestors [^;]*\" \"frame-ancestors 'self' https://{portal}\"\n\
+             \t}}\n\
              }}\n",
+            portal = spec.portal_host,
             host = sv.host,
             https = spec.listen_port,
             cert = quote(&spec.cert),
@@ -326,7 +332,12 @@ mod tests {
             services: &services,
             ..spec(&m)
         });
-        assert!(c.contains("https://navidrome.kit.local:8443 {\n\ttls \"/d/net/ca/leaf.pem\" \"/d/net/ca/leaf.key\"\n\treverse_proxy 127.0.0.1:4533\n}"));
+        assert!(c.contains("https://navidrome.kit.local:8443 {\n\ttls \"/d/net/ca/leaf.pem\" \"/d/net/ca/leaf.key\"\n\treverse_proxy 127.0.0.1:4533 {\n"));
+        assert!(c.contains("\t\theader_down -X-Frame-Options\n"));
+        assert!(
+            c.contains("\"frame-ancestors 'self' https://kit.local\"\n\t}\n}"),
+            "{c}"
+        );
     }
 
     #[test]
