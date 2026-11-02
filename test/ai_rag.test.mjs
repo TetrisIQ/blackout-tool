@@ -40,6 +40,38 @@ assert.deepEqual(
 );
 
 assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b']);
+assert.deepEqual(R.queryLadder('a b c d'), ['a b c d', 'a b c', 'a b d', 'a c d', 'b c d', 'a b']);
+assert.deepEqual(R.queryLadder('a b c'), ['a b c', 'a b', 'a c', 'b c']);
+
+// One hit per title (the original, not the translated copy), then title/snippet matches first.
+const h = (title, href, snippet = '') => ({ title, href, snippet });
+const dd = R.dedupeTitles([h('Burns', '/content/b/www/ar/node/1'), h('Water', '/content/b/www/node/2'), h('Burns', '/content/b/www/node/1')]);
+assert.deepEqual(dd.map((x) => x.href), ['/content/b/www/node/2', '/content/b/www/node/1']);
+assert.deepEqual(
+  R.rankHits([h('Urgent care', '/a'), h('Friction burn', '/b'), h('Burns treatment', '/c'), h('Other', '/d', 'minor burn treatment')], 'minor burn treatment').map((x) => x.href),
+  ['/c', '/b', '/d', '/a'],
+);
+
+// retrieve(): ladder, ranking, dedupe and the coverage filter against a fake library.
+const page = (t) => '<html><body><p>' + t + '</p></body></html>';
+const rss = (...hs) => '<rss><channel>' + hs.map((x) => '<item><title>' + x.title + '</title><link>' + x.href + '</link><description>' + x.snippet + '</description></item>').join('') + '</channel></rss>';
+const calls = [];
+const lib = async (url) => {
+  calls.push(url);
+  if (url.startsWith('/search')) {
+    const p = new URL('http://x' + url).searchParams.get('pattern');
+    if (p === 'safe drinking water') {
+      return rss(h('Water', '/content/b/ar/node/9', 'boil'), h('Water', '/content/b/node/9', 'boil'), h('Noise', '/content/b/n', ''));
+    }
+    return rss();
+  }
+  return page(url.endsWith('/node/9') ? 'Boil water for one minute to make drinking water safe in an emergency situation.' : 'Unrelated text about something else entirely, long enough to count.');
+};
+const r = await R.retrieve('safe drinking water emergency', lib, ['bk']);
+assert.equal(r.used, 'safe drinking water emergency');
+assert.deepEqual(r.found.map((x) => x.href), ['/content/b/node/9']);
+assert.ok(calls[0].includes('books.name=bk') && calls[0].includes('pageLength=6'));
+assert.deepEqual((await R.retrieve('zzz yyy', lib, [])).found, []);
 assert.deepEqual(R.queryLadder('a b'), ['a b']);
 assert.deepEqual(R.queryLadder('a'), ['a']);
 

@@ -97,10 +97,76 @@
     return items.filter((i) => plain(i.title) === i.title || !have.has(plain(i.title)));
   }
 
-  // The search needs all terms to occur, so a long list finds nothing: try it, then the first 3 and 2.
+  // The search needs all terms to occur, so a long list finds nothing. Order of tries: the full list, with up to
+  // 4 terms every list that leaves one term out (last ones first), then the first 3 and the first 2 terms.
   function queryLadder(query) {
     const w = query.split(' ').filter(Boolean);
-    return [...new Set([w.join(' '), w.slice(0, 3).join(' '), w.slice(0, 2).join(' ')])].filter((q) => q.length > 0);
+    const out = [w.join(' ')];
+    if (w.length >= 3 && w.length <= 4) {
+      for (let drop = w.length - 1; drop >= 0; drop--) out.push(w.filter((_, i) => i !== drop).join(' '));
+    }
+    out.push(w.slice(0, 3).join(' '), w.slice(0, 2).join(' '));
+    return [...new Set(out)].filter((q) => q.length > 0);
+  }
+
+  // Ready.gov and similar books hold every page once per language under the same title (".../ar/node/1",
+  // ".../fr/node/1"); they would fill the whole result list. Keep one per title, the shortest link (the
+  // original has no language segment), at the position of the first occurrence.
+  function dedupeTitles(items) {
+    const best = new Map();
+    for (const i of items) {
+      const b = best.get(i.title);
+      if (!b || i.href.length < b.href.length) best.set(i.title, i);
+    }
+    return items.filter((i) => best.get(i.title) === i);
+  }
+
+  // Hits whose title and snippet mention more of the query terms first; ties keep the search engine's order.
+  function rankHits(items, query) {
+    const score = (i) => 2 * coverage(i.title, query) + coverage(i.title + ' ' + i.snippet, query);
+    return items
+      .map((item, n) => ({ item, n, s: score(item) }))
+      .sort((a, b) => b.s - a.s || a.n - b.n)
+      .map((x) => x.item);
+  }
+
+  // Candidate pages for a keyword string. The search needs all terms, so the ladder of shorter strings is
+  // searched too and everything is ranked together against the full keyword string by how much of it the
+  // title and snippet mention (the engine's rank within a list breaks ties). Every book is searched on its
+  // own, because one big book such as the Wikipedia medicine extract would otherwise fill the list and hide
+  // Ready.gov or CDC; no book contributes more than `perBook` pages.
+  async function candidates(query, get, books, o) {
+    const names = books && books.length > 0 ? books : [null];
+    const lists = await Promise.all(queryLadder(query).flatMap((q) => names.map(async (b) => {
+      const scope = b ? '&books.name=' + encodeURIComponent(b) : '';
+      const xml = await get('/search?format=xml&pageLength=' + o.pageLength + '&pattern=' + encodeURIComponent(q) + scope);
+      return dedupeTitles(dropVariants(parseSearch(xml))).map((item, n) => ({ item, n, book: b || item.href.split('/')[2] }));
+    })));
+    const best = new Map();
+    for (const x of lists.flat()) {
+      const k = x.item.href;
+      if (!best.has(k) || x.n < best.get(k).n) best.set(k, x);
+    }
+    const score = (x) => 2 * coverage(x.item.title, query) + coverage(x.item.title + ' ' + x.item.snippet, query) - 0.05 * x.n;
+    const ranked = [...best.values()].sort((a, b) => score(b) - score(a));
+    const used = {};
+    return ranked.filter((x) => (used[x.book] = (used[x.book] || 0) + 1) <= o.perBook).slice(0, o.hits).map((x) => x.item);
+  }
+
+  // Passages for a keyword string. `get(url)` resolves to the response body text (the page passes fetch).
+  // Returns `{found: [{title, href, text}], used}`; `used` is the keyword string, for the "nothing found" notice.
+  async function retrieve(query, get, books, opts) {
+    const o = Object.assign({ hits: 4, perBook: 2, chars: 1400, pageLength: 6 }, opts);
+    const out = [];
+    for (const h of await candidates(query, get, books, o)) {
+      try {
+        out.push({ title: h.title, href: h.href, text: pickPassage(htmlToText(await get(h.href)), query, o.chars) });
+      } catch (e) {
+        out.push({ title: h.title, href: h.href, text: h.snippet });
+      }
+    }
+    // Keep passages that mention at least half of the keywords (title included).
+    return { found: out.filter((p) => p.text.length > 0 && coverage(p.title + ' ' + p.text, query) >= 0.5), used: query };
   }
 
   function keywordMessages(question) {
@@ -140,7 +206,7 @@
     ];
   }
 
-  const api = { queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
+  const api = { retrieve, rankHits, dedupeTitles, queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Rag = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

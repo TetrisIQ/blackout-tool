@@ -93,28 +93,7 @@
   }
 
   // `query` is the English keyword string: the library is English, the question may not be.
-  // `query` is the English keyword string: the library is English, the question may not be.
-  // Returns the passages and the search string that found them.
-  async function passages(query) {
-    for (const q of Rag.queryLadder(query)) {
-      const scope = books.map((b) => '&books.name=' + encodeURIComponent(b)).join('');
-      const r = await fetch('/search?format=xml&pageLength=8&pattern=' + encodeURIComponent(q) + scope);
-      const hits = Rag.dropVariants(Rag.parseSearch(await r.text())).slice(0, 4);
-      const out = [];
-      for (const h of hits) {
-        try {
-          const page = await (await fetch(h.href)).text();
-          out.push({ title: h.title, href: h.href, text: Rag.pickPassage(Rag.htmlToText(page), q, 1400) });
-        } catch (e) {
-          out.push({ title: h.title, href: h.href, text: h.snippet });
-        }
-      }
-      // Keep passages that mention at least half of the search terms (title included).
-      const kept = out.filter((p) => p.text.length > 0 && Rag.coverage(p.title + ' ' + p.text, q) >= 0.5);
-      if (kept.length > 0) return { found: kept, used: q };
-    }
-    return { found: [], used: query };
-  }
+  const passages = (query) => Rag.retrieve(query, async (url) => (await fetch(url)).text(), books);
 
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
