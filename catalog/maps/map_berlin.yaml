@@ -5,7 +5,7 @@ category: maps
 type: map
 source:
   map: {bbox: [13.08, 52.33, 13.76, 52.68], maxzoom: 14}
-size_bytes: 200000000
+size_bytes: 31000000
 license:
   spdx: ODbL-1.0
   url: https://www.openstreetmap.org/copyright

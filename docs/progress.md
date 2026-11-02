@@ -159,8 +159,8 @@ Found by the first real install of the test profile: no login, no library.
 - **Tests:** 269 pass (new: manifest rules, installer against `FakeRunner`/`FakeHttp` incl. failed verify, offline, missing tool, verify/uninstall; portal section and `regions.json`).
 
 ### Caveats
-- **Sizes in the two manifests are guesses.** I could not run `pmtiles extract --dry-run` in this session (downloading the binary was blocked). Measure with `pmtiles extract <build URL> /dev/null --bbox=... --maxzoom=... --dry-run` and fix `size_bytes` before relying on `kit plan`.
-- **Not run for real:** `pmtiles extract` against a live build, and the viewer in a browser (including range requests through Caddy, symlinks, label fonts). Needs `pmtiles`, caddy and a browser.
+- **Sizes measured** (go-pmtiles 1.31.2, build 20261102, `extract --dry-run`): Berlin zoom 14 is 31 MB (was guessed 200 MB), Germany zoom 13 is 1.8 GB (was guessed 2.5 GB); manifests corrected. Sizes grow with newer builds, so they stay estimates.
+- **Checked for real:** `pmtiles extract` of Berlin against the live build plus `pmtiles verify`; `kit install --select map_berlin` with temp data/XDG dirs; the viewer in headless Firefox served by `caddy file-server` (206 Partial Content, symlink, roads, water, labels and attribution render). Not checked: Chromium, the full path through `kit net enable` (HTTPS), the Germany extract, geolocation.
 - **The viewer shows no search/routing**, only panning, zoom, region switch and the browser's geolocation.
 - Still open in Phase 7: local LLM (`survival-llm` is a desktop app around Ollama with its own library, not a model; plan is Ollama/llama.cpp as a service plus Kiwix search), hardware check, Whisper/translation, apt/pip mirror subset.
 
