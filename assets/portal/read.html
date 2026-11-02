@@ -39,7 +39,7 @@ header { border-bottom: 1px solid var(--color-divider); }
     </div>
   </details>
 </header>
-<iframe id="page" title="Article" referrerpolicy="same-origin"></iframe>
+<iframe id="page" title="Article" allow="fullscreen; autoplay; picture-in-picture; clipboard-write" allowfullscreen referrerpolicy="same-origin"></iframe>
 </div>
 <script>
 {{COMMON_JS}}</script>
@@ -48,8 +48,13 @@ header { border-bottom: 1px solid var(--color-divider); }
   var frame = document.getElementById('page');
   function target() {
     var t = decodeURI(location.hash.slice(1));
-    // Only paths on this origin: never a full URL from the address bar.
-    return /^\/[^\/]/.test(t) ? t : '/';
+    // A path on this origin, or a service under it (https://<name>.<this host>/): never another site.
+    if (/^\/[^\/]/.test(t)) return t;
+    try {
+      var u = new URL(t);
+      if (u.protocol === 'https:' && u.hostname.endsWith('.' + location.hostname)) return u.href;
+    } catch (e) {}
+    return '/';
   }
   // Dark theme for the article: the frame is inverted as a whole, pictures and video inside it are
   // inverted back so they keep their colours.
@@ -71,7 +76,7 @@ header { border-bottom: 1px solid var(--color-divider); }
         var st = d.createElement('style'); st.id = 'kit-dark'; st.textContent = css; d.head.appendChild(st);
       }
       d.documentElement.classList.toggle('kit-dark', dark);
-    } catch (e) { frame.classList.toggle('dark', dark && isArticle(target())); }
+    } catch (e) { frame.classList.remove('dark'); } // another origin (a service): its own look
   }
   new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   theme();
@@ -85,8 +90,10 @@ header { border-bottom: 1px solid var(--color-divider); }
     } catch (e) {}
   });
   window.addEventListener('hashchange', function () {
-    var l = frame.contentWindow.location;
-    if (target() !== l.pathname + l.search + l.hash) frame.contentWindow.location.replace(target());
+    var t = target(), cur = null;
+    try { var l = frame.contentWindow.location; cur = l.pathname + l.search + l.hash; } catch (e) {}
+    if (t === cur) return;
+    try { frame.contentWindow.location.replace(t); } catch (e) { frame.src = t; }
   });
 })();
 </script>

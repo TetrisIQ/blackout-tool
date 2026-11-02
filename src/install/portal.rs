@@ -211,7 +211,8 @@ fn launcher_tiles(state: &State, origin: Origin) -> String {
     for (r, sv) in state.services() {
         let href = match origin {
             Origin::File(_) => format!("http://127.0.0.1:{}/", sv.port),
-            Origin::Front { .. } => format!("https://{}/", esc(&sv.host)),
+            // Under the portal header, in the reading frame.
+            Origin::Front { .. } => format!("/read.html#https://{}/", esc(&sv.host)),
         };
         tiles.push_str(&tile(
             service_icon(&format!("{} {}", r.id, r.name)),
@@ -595,6 +596,26 @@ mod tests {
             );
             assert!(html.contains(":root[data-theme=dark]") && !html.contains("{{"));
         }
+    }
+
+    #[test]
+    fn services_open_in_the_reading_frame_on_the_front_only() {
+        let mut st = State::default();
+        let mut sv = sample_record("jelly", "x", 1);
+        sv.name = "Jellyfin (films)".into();
+        sv.service = Some(super::super::state::ServiceRecord {
+            host: "jelly.kit.local".into(),
+            port: 8096,
+            unit: "j.service".into(),
+            image: "x".into(),
+        });
+        st.packages.insert("jelly".into(), sv);
+        let front = render_page(&st, Origin::Front { host: "kit.local" });
+        assert!(
+            front.contains("href=\"/read.html#https://jelly.kit.local/\""),
+            "{front}"
+        );
+        assert!(render_index(&st).contains("href=\"http://127.0.0.1:8096/\""));
     }
 
     #[test]
