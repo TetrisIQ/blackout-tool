@@ -40,9 +40,9 @@ assert.deepEqual(
   ['Pacman', 'Mirrors', 'Mercury (element)', 'Mercury (planet)'],
 );
 
-assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b', 'a']);
-assert.deepEqual(R.queryLadder('a b c d'), ['a b c d', 'a b c', 'a b d', 'a c d', 'b c d', 'a b', 'a']);
-assert.deepEqual(R.queryLadder('a b c'), ['a b c', 'a b', 'a c', 'b c', 'a']);
+assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b', 'a', 'b', 'c', 'd', 'e']);
+assert.deepEqual(R.queryLadder('a b c d'), ['a b c d', 'a b c', 'a b d', 'a c d', 'b c d', 'a b', 'a', 'b', 'c', 'd']);
+assert.deepEqual(R.queryLadder('a b c'), ['a b c', 'a b', 'a c', 'b c', 'a', 'b', 'c']);
 
 // One hit per title (the original, not the translated copy), then title/snippet matches first.
 const h = (title, href, snippet = '') => ({ title, href, snippet });
@@ -73,11 +73,23 @@ assert.equal(r.used, 'safe drinking water emergency');
 assert.deepEqual(r.found.map((x) => x.href), ['/content/b/node/9']);
 assert.ok(calls[0].includes('books.name=bk') && calls[0].includes('pageLength=6'));
 assert.deepEqual((await R.retrieve('zzz yyy', lib, [])).found, []);
-assert.deepEqual(R.queryLadder('a b'), ['a b']);
+assert.deepEqual(R.queryLadder('a b'), ['a b', 'a', 'b']);
 assert.deepEqual(R.queryLadder('a'), ['a']);
 
 const msgs = R.buildMessages('Q?', [{ title: 'T', text: 'body' }], [{ role: 'user', content: 'earlier' }]);
 assert.equal(msgs[0].role, 'system');
 assert.ok(msgs[0].content.includes('[1] T\nbody') && msgs[0].content.includes('Never invent'));
 assert.deepEqual(msgs.slice(1).map((m) => m.content), ['earlier', 'Q?']);
+
+// The reply's first line names the passages that are about the question.
+assert.deepEqual(R.splitSources('SOURCES: 1 3\n\nAnswer [1].', 4), { state: 'ok', sources: [0, 2], body: 'Answer [1].' });
+assert.deepEqual(R.splitSources('Sources: none', 4, true), { state: 'ok', sources: [], body: '' });
+assert.deepEqual(R.splitSources('**SOURCES:** 2, 9\ntext', 4), { state: 'ok', sources: [1], body: 'text' });
+assert.deepEqual(R.splitSources('SOURCES: 1', 4), { state: 'pending' });
+assert.deepEqual(R.splitSources('[1] burns\n[2] a device\nSOURCES: 1\nUse water [1].', 4), { state: 'ok', sources: [0], body: 'Use water [1].' });
+assert.deepEqual(R.splitSources('[1] burns\n[2] a de', 4), { state: 'pending' });
+assert.deepEqual(R.splitSources('SOUR', 4), { state: 'pending' });
+assert.equal(R.splitSources('Here is the answer.\nmore', 4, true).state, 'bad');
+assert.equal(R.splitSources('SOURCES: see below\nx', 4).sources.length, 0);
+assert.ok(R.buildMessages('Q?', [{ title: 'T', text: 'b' }], [])[0].content.includes('SOURCES: none'));
 console.log('ai_rag: all checks passed');

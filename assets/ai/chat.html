@@ -126,21 +126,32 @@
         timing.textContent = 'Search took ' + secs(tSearch) + '; no model call.';
         return;
       }
-      status.textContent = 'Answering from ' + found.length + ' passage' + (found.length > 1 ? 's' : '') + ' ...';
-      src.append('Passages used: ');
-      found.forEach((p, i) => {
-        const a = el('a', '', '[' + (i + 1) + '] ' + p.title);
-        a.href = p.href;
-        src.append(a);
-      });
+      status.textContent = 'Reading ' + found.length + ' passage' + (found.length > 1 ? 's' : '') + ' ...';
       const resp = await chat({ stream: true, messages: Rag.buildMessages(question, found, history),
                                 think: reasoning,
                                 options: reasoning ? Rag.OPTIONS.reasoning : Rag.OPTIONS.answer });
       if (!resp.ok) throw new Error('assistant answered ' + resp.status);
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let buf = '', full = '', stats = null;
-      for (;;) {
+      let buf = '', full = '', stats = null, parsed = { state: 'pending' }, shown = false;
+      // The reply begins with "SOURCES: ..." naming the passages that really answer; nothing is shown before
+      // that line is complete, and an answer without sources (or with "none") is never shown.
+      const update = (finished) => {
+        parsed = Rag.splitSources(full, found.length, finished);
+        if (parsed.state !== 'ok' || parsed.sources.length === 0) return;
+        if (!shown) {
+          shown = true;
+          src.append('Passages used: ');
+          parsed.sources.forEach((i) => {
+            const a = el('a', '', '[' + (i + 1) + '] ' + found[i].title);
+            a.href = found[i].href;
+            src.append(a);
+          });
+        }
+        answer.textContent = parsed.body;
+        status.textContent = '';
+      };
+      read: for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
@@ -158,20 +169,33 @@
           if (part.message && part.message.content) {
             if (!tFirst) tFirst = performance.now();
             full += part.message.content;
-            answer.textContent = full;
-            status.textContent = '';
+            update(false);
+            if (parsed.state === 'bad' || (parsed.state === 'ok' && parsed.sources.length === 0)) {
+              reader.cancel();
+              break read;
+            }
           }
           if (part.done) stats = part;
         }
       }
+      update(true);
       const end = performance.now();
+      if (parsed.state !== 'ok' || parsed.sources.length === 0) {
+        status.textContent = '';
+        answer.textContent = (parsed.state === 'bad'
+          ? 'The assistant did not say which passage its answer comes from, so the answer is not shown.'
+          : 'The library has pages that mention these words, but none of them answers the question directly') +
+          ' (looked at: ' + found.map((p) => p.title).join('; ') + '). No answer is given without a source.';
+        timing.textContent = 'Checked in ' + secs(end) + '; no answer given.';
+        return;
+      }
       let line = 'Answered in ' + secs(end) + ' (search ' + secs(tSearch) + ', first word ' + secs(tFirst || end) + ')';
       if (stats && stats.eval_count && stats.eval_duration) {
         line += ', ' + stats.eval_count + ' tokens at ' + (stats.eval_count / (stats.eval_duration / 1e9)).toFixed(0) + ' tokens/s';
       }
       timing.textContent = line + (reasoning ? ', with reasoning' : '');
       console.log('assistant timing:', line);
-      history.push({ role: 'user', content: question }, { role: 'assistant', content: full });
+      history.push({ role: 'user', content: question }, { role: 'assistant', content: parsed.body });
       if (history.length > 6) history.splice(0, 2);
     } catch (e) {
       status.textContent = '';

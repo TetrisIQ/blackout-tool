@@ -99,7 +99,7 @@
   }
 
   // The search needs all terms to occur, so a long list finds nothing. Order of tries: the full list, with up to
-  // 4 terms every list that leaves one term out (last ones first), then the first 3, the first 2 and the first term.
+  // 4 terms every list that leaves one term out (last ones first), then the first 3, the first 2 and every single term (a short word such as an acronym finds its page alone).
   function queryLadder(query) {
     const w = query.split(' ').filter(Boolean);
     const out = [w.join(' ')];
@@ -107,7 +107,7 @@
       for (let drop = w.length - 1; drop >= 0; drop--) out.push(w.filter((_, i) => i !== drop).join(' '));
     }
     out.push(w.slice(0, 3).join(' '), w.slice(0, 2).join(' '));
-    if (w.length >= 3) out.push(w[0]);
+    if (w.length >= 2) out.push(...w);
     return [...new Set(out)].filter((q) => q.length > 0);
   }
 
@@ -136,7 +136,7 @@
   // searched too and everything is ranked together against the full keyword string by how much of it the
   // title and snippet mention (the engine's rank within a list breaks ties). Every book is searched on its
   // own, because one big book such as the Wikipedia medicine extract would otherwise fill the list and hide
-  // Ready.gov or CDC; no book contributes more than `perBook` pages.
+  // Ready.gov or CDC. Returns all candidates, best first; `retrieve` applies the per-book limit.
   async function candidates(query, extra, get, books, o) {
     const names = books && books.length > 0 ? books : [null];
     const lists = await Promise.all([...new Set([...queryLadder(query), ...extra.flatMap(queryLadder)])].flatMap((q) => names.map(async (b) => {
@@ -157,9 +157,7 @@
     const all = [query, ...extra].join(' ');
     const score = (x) => 2 * coverage(x.item.title, all) + coverage(x.item.title + ' ' + x.item.snippet, all) - 0.05 * x.n -
       0.03 * x.item.title.replace(/\|.*$/, '').split(/\s+/).length;
-    const ranked = [...best.values()].sort((a, b) => score(b) - score(a));
-    const used = {};
-    return ranked.filter((x) => (used[x.book] = (used[x.book] || 0) + 1) <= o.perBook).slice(0, o.hits).map((x) => x.item);
+    return [...best.values()].sort((a, b) => score(b) - score(a));
   }
 
   // Words that say "this is a question about help" and never occur as the subject of a page; they only dilute the
@@ -201,28 +199,43 @@
   // With `opts.question` the question's own terms are searched as well. Returns `{found: [{title, href, text}],
   // used}`; `used` is the keyword string, for the "nothing found" notice.
   async function retrieve(query, get, books, opts) {
-    const o = Object.assign({ hits: 4, perBook: 2, chars: 1400, pageLength: 6, question: '' }, opts);
+    const o = Object.assign({ hits: 4, perBook: 2, chars: 1400, pageLength: 6, maxFetch: 16, question: '' }, opts);
     const extra = [questionTerms(o.question)].filter((q) => q && q !== query);
     const all = [query, ...extra].join(' ');
-    const out = [];
-    for (const h of await candidates(query, extra, get, books, o)) {
+    // Walk down the ranking until `hits` passages are kept. A page whose passage does not mention at least half of
+    // the keywords (title included) is dropped, and only kept pages count for the per-book limit.
+    const found = [];
+    const used = {};
+    let fetched = 0;
+    for (const x of await candidates(query, extra, get, books, o)) {
+      if (found.length >= o.hits || fetched >= o.maxFetch) break;
+      if ((used[x.book] || 0) >= o.perBook) continue;
+      fetched++;
+      let text;
       try {
-        out.push({ title: h.title, href: h.href, text: pickPassage(htmlToText(await get(h.href)), all, o.chars) });
+        text = pickPassage(htmlToText(await get(x.item.href)), all, o.chars);
       } catch (e) {
-        out.push({ title: h.title, href: h.href, text: h.snippet });
+        text = x.item.snippet;
+      }
+      if (text.length > 0 && coverage(x.item.title + ' ' + text, query) >= 0.5) {
+        found.push({ title: x.item.title, href: x.item.href, text });
+        used[x.book] = (used[x.book] || 0) + 1;
       }
     }
-    // Keep passages that mention at least half of the keywords (title included).
-    return { found: out.filter((p) => p.text.length > 0 && coverage(p.title + ' ' + p.text, query) >= 0.5), used: query };
+    return { found, used: query };
   }
 
   const SYSTEM =
     'You are an offline assistant on a laptop without internet. Answer ONLY from the numbered passages below, ' +
-    'taken from the local library. Cite the passages you use like [1]. If the passages do not answer the ' +
-    'question, say so plainly and do not guess; for anything dangerous or medical tell the person to call the ' +
-    'local emergency number (112 in Europe, 911 in the US). Never invent distances, doses or numbers. ' +
-    'Write the final answer directly and briefly, in the language of the question. Do not think aloud, ' +
-    'do not discuss these rules or the passages\' wording, and do not repeat yourself.';
+    'taken from the local library. Begin your reply with one line "SOURCES:" followed by the numbers of the ' +
+    'passages that are about the very thing asked (the same condition, action, hazard or medicine) and state what ' +
+    'you use, for example "SOURCES: 1 3". A passage about something else, about a device, about a different ' +
+    'condition or person, or one that merely shares a word with the question is NOT a source. If no passage is ' +
+    'about the very thing asked and states the answer, reply with the single line "SOURCES: none" and nothing ' +
+    'else. Otherwise continue after that line with the answer, citing the passages like [1]. For anything dangerous ' +
+    'or medical tell the person to call the local emergency number (112 in Europe, 911 in the US). Never invent ' +
+    'distances, doses or numbers. Write the answer directly and briefly, in the language of the question. Do not ' +
+    'think aloud, do not discuss these rules or the passages\' wording, and do not repeat yourself.';
 
   function buildMessages(question, passages, history) {
     const context = passages.map((p, i) => '[' + (i + 1) + '] ' + p.title + '\n' + p.text).join('\n\n');
@@ -233,6 +246,20 @@
     ];
   }
 
+  // The reply starts with a line "SOURCES: 1 3" (or "SOURCES: none") naming the passages that are about the very
+  // thing asked; the answer follows. `full` is the reply so far (it may still be streaming; `done` says it is complete):
+  //   {state: 'pending'}                          the first line is not complete yet
+  //   {state: 'ok', sources: [0, 2], body: '...'}  0-based indexes of the named passages ([] for none) and the answer
+  //   {state: 'bad'}                              no such line: the format was ignored, treated like "none"
+  function splitSources(full, n, done) {
+    const m = /^[ \t]*\**SOURCES\**[ \t]*:[ \t]*([^\n]*)(\n|$)/im.exec(full);
+    if (!m) return done || full.length > 300 ? { state: 'bad' } : { state: 'pending' };
+    if (m[2] === '' && !done && m[1].length < 40) return { state: 'pending' };
+    const line = m[1];
+    const nums = /\bnone\b/i.test(line) ? [] : [...new Set((line.match(/\d+/g) || []).map(Number).filter((k) => k >= 1 && k <= n))];
+    return { state: 'ok', sources: nums.sort((a, b) => a - b).map((k) => k - 1), body: full.slice(m.index + m[0].length).trim() };
+  }
+
   // Ollama options of the two calls; the page and test/ai_eval.mjs share them so the evaluation measures what runs.
   const OPTIONS = {
     keywords: { temperature: 0, num_predict: 24, num_ctx: 8192 },
@@ -240,7 +267,7 @@
     reasoning: { temperature: 0.2, num_ctx: 8192, num_predict: 3000 },
   };
 
-  const api = { OPTIONS, retrieve, rankHits, dedupeTitles, queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
+  const api = { splitSources, OPTIONS, retrieve, rankHits, dedupeTitles, queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Rag = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -11,7 +11,9 @@
    "toothpaste",
    "\\bice\\b",
    "ointment"
-  ]
+  ],
+  "set": "dev",
+  "page": "Preventing and Treating Burns"
  },
  {
   "id": "burn-minor-de",
@@ -26,7 +28,9 @@
    "butter",
    "zahnpasta",
    "\\beis\\b"
-  ]
+  ],
+  "set": "dev",
+  "page": "Preventing and Treating Burns"
  },
  {
   "id": "water-boil",
@@ -34,7 +38,9 @@
   "facts": [
    "1 minute|one minute",
    "3 minutes|three minutes|2,?000"
-  ]
+  ],
+  "set": "dev",
+  "page": "Avoid Contaminated Water During Travel"
  },
  {
   "id": "water-boil-de",
@@ -44,7 +50,9 @@
   ],
   "answer": [
    "abkoch|koch|filter|desinfi"
-  ]
+  ],
+  "set": "dev",
+  "page": "Water | Ready.gov"
  },
  {
   "id": "water-per-person",
@@ -52,21 +60,25 @@
   "facts": [
    "one gallon|1 gallon",
    "per day|each day|daily"
-  ]
+  ],
+  "set": "dev",
+  "page": "Water | Ready.gov"
  },
  {
   "id": "fridge-outage",
   "question": "How long does food in the fridge stay safe during a power outage?",
   "facts": [
    "4 hours|four hours"
-  ]
+  ],
+  "set": "dev",
+  "page": "Food | Ready.gov"
  },
  {
   "id": "freezer-outage",
   "question": "How long does food in a full freezer stay frozen without power?",
-  "facts": [
-   "48 hours"
-  ]
+  "set": "dev",
+  "none": true,
+  "note": "the library states 4 hours for the fridge but not the freezer time"
  },
  {
   "id": "generator-co",
@@ -81,7 +93,9 @@
   "answer": [
    "outside|outdoors",
    "away|feet"
-  ]
+  ],
+  "set": "dev",
+  "page": "Power Outages | Ready.gov"
  },
  {
   "id": "hypothermia",
@@ -92,7 +106,9 @@
   "forbid": [
    "alcohol",
    "hot bath"
-  ]
+  ],
+  "set": "dev",
+  "page": "Hypothermia"
  },
  {
   "id": "heat-exhaustion",
@@ -100,7 +116,9 @@
   "facts": [
    "cool|shade|air.?condition",
    "water|fluids"
-  ]
+  ],
+  "set": "dev",
+  "page": "Extreme Heat | Ready.gov"
  },
  {
   "id": "earthquake",
@@ -109,7 +127,9 @@
    "drop",
    "cover",
    "hold on"
-  ]
+  ],
+  "set": "dev",
+  "page": "Earthquakes | Ready.gov"
  },
  {
   "id": "flood-drive",
@@ -119,7 +139,9 @@
   ],
   "forbid": [
    "is safe to drive"
-  ]
+  ],
+  "set": "dev",
+  "page": "Floods | Ready.gov"
  },
  {
   "id": "diarrhea",
@@ -127,18 +149,16 @@
   "facts": [
    "rehydrat|fluids|oral"
   ],
-  "known": "British spelling: the CDC pages say 'diarrhea', the search does not match 'diarrhoea'"
+  "known": "British spelling: the CDC pages say 'diarrhea', the search does not match 'diarrhoea'",
+  "set": "dev",
+  "page": "Travelers’ Diarrhea"
  },
  {
   "id": "canning-lowacid",
   "question": "How do I safely can low-acid vegetables?",
-  "facts": [
-   "pressure (canner|canning)"
-  ],
-  "forbid": [
-   "boiling.water (bath )?canner is (enough|safe)"
-  ],
-  "known": "the USDA ZIM has no searchable text (only a home page), so no source answers this"
+  "set": "dev",
+  "none": true,
+  "note": "the USDA ZIM has no searchable text, so the library cannot answer this"
  },
  {
   "id": "paracetamol",
@@ -146,7 +166,9 @@
   "facts": [
    "8 tablets|4 ?g\\b|4,?000 ?mg"
   ],
-  "forbid": []
+  "forbid": [],
+  "set": "dev",
+  "page": "Paracetamol for adults"
  },
  {
   "id": "cpr",
@@ -154,7 +176,9 @@
   "facts": [
    "100",
    "120"
-  ]
+  ],
+  "set": "dev",
+  "page": "Cardiopulmonary resuscitation"
  },
  {
   "id": "choking",
@@ -164,7 +188,9 @@
   ],
   "answer": [
    "thrust|heimlich|back blow|pressure"
-  ]
+  ],
+  "set": "dev",
+  "page": "Choking"
  },
  {
   "id": "shock-signs",
@@ -172,50 +198,328 @@
   "facts": [
    "pale|clammy|cold",
    "pulse|breath"
-  ]
+  ],
+  "set": "dev",
+  "page": "Shock (circulatory)"
  },
  {
   "id": "tsunami",
   "question": "What should I do after a tsunami warning?",
   "facts": [
    "higher ground|inland|move"
-  ]
+  ],
+  "set": "dev",
+  "page": "Tsunamis | Ready.gov"
  },
  {
   "id": "wound-bleeding",
   "question": "How do I stop heavy bleeding?",
   "facts": [
    "pressure|direct pressure"
-  ]
+  ],
+  "set": "dev",
+  "page": "Emergency bleeding control",
+  "find": "bleeding control"
  },
  {
   "id": "power-line",
   "question": "How far must I stay from a downed power line?",
-  "facts": [
-   "downed|fallen|power line"
-  ],
-  "forbid": [
-   "\\b\\d+ (feet|ft|metres|meters|m)\\b"
-  ]
+  "set": "dev",
+  "none": true,
+  "note": "Ready.gov says to stay away from downed lines but gives no distance"
  },
  {
   "id": "none-worldcup",
   "question": "Who won the 2018 football World Cup?",
-  "none": true
+  "none": true,
+  "set": "dev"
  },
  {
   "id": "none-docker",
   "question": "How do I install Docker on Windows?",
-  "none": true
+  "none": true,
+  "set": "dev"
  },
  {
   "id": "none-pizza",
   "question": "What is a good recipe for pizza dough?",
+  "none": true,
+  "set": "dev"
+ },
+ {
+  "id": "everest-de",
+  "question": "Wie hoch ist der Mount Everest?",
+  "set": "dev",
+  "page": "Nepal | CDC Yellow Book 2024",
+  "facts": [
+   "8[.,]?848"
+  ],
+  "note": "the CDC Nepal page states the height"
+ },
+ {
+  "id": "h-aspirin-kids",
+  "set": "holdout",
+  "question": "Can I give aspirin to my 10 year old child?",
+  "page": "Aspirin: medicine for pain relief",
+  "facts": [
+   "under 16|15 years|Reye"
+  ],
+  "forbid": [
+   "you can give"
+  ]
+ },
+ {
+  "id": "h-sunburn",
+  "set": "holdout",
+  "question": "How do I soothe sunburn?",
+  "page": "Sunburn",
+  "facts": [
+   "aloe|moisturi"
+  ],
+  "forbid": [
+   "butter"
+  ]
+ },
+ {
+  "id": "h-sprain",
+  "set": "holdout",
+  "question": "How do I treat a sprained ankle?",
+  "page": "Sprained ankle",
+  "facts": [
+   "rest",
+   "\\bice\\b|icing",
+   "compression",
+   "elevation"
+  ]
+ },
+ {
+  "id": "h-frostbite",
+  "set": "holdout",
+  "question": "How is frostbite treated?",
+  "page": "Frostbite",
+  "facts": [
+   "rewarm"
+  ],
+  "forbid": [
+   "rub(bing)? (the )?(snow|skin|area)"
+  ]
+ },
+ {
+  "id": "h-handwash",
+  "set": "holdout",
+  "question": "How long should I wash my hands, and what if there is no soap?",
+  "page": "Pandemics | Ready.gov",
+  "facts": [
+   "20 seconds",
+   "sanitizer"
+  ]
+ },
+ {
+  "id": "h-repellent",
+  "set": "holdout",
+  "question": "Which insect repellents does the CDC recommend?",
+  "page": "Insect repellent",
+  "facts": [
+   "DEET",
+   "picaridin|icaridin"
+  ]
+ },
+ {
+  "id": "h-anaphylaxis",
+  "set": "holdout",
+  "question": "What is the main treatment for anaphylaxis?",
+  "page": "Anaphylaxis",
+  "facts": [
+   "epinephrine|adrenaline"
+  ]
+ },
+ {
+  "id": "h-heat-signs",
+  "set": "holdout",
+  "question": "What are the signs of heat exhaustion?",
+  "page": "Extreme Heat | Ready.gov",
+  "facts": [
+   "sweating",
+   "pale"
+  ]
+ },
+ {
+  "id": "h-lightning",
+  "set": "holdout",
+  "question": "Where should I shelter during a thunderstorm?",
+  "page": "Lightning injury",
+  "facts": [
+   "enclosed|closed building|car"
+  ],
+  "forbid": [
+   "under (a|the) tree"
+  ]
+ },
+ {
+  "id": "h-wildfire",
+  "set": "holdout",
+  "question": "What should I do when a wildfire evacuation is advised?",
+  "page": "Wildfire Safety Social Media Toolkit",
+  "facts": [
+   "evacuat"
+  ]
+ },
+ {
+  "id": "h-ibuprofen-food",
+  "set": "holdout",
+  "question": "Should I take ibuprofen with food?",
+  "page": "Common questions about ibuprofen and codeine",
+  "facts": [
+   "with food"
+  ]
+ },
+ {
+  "id": "h-trench-foot",
+  "set": "holdout",
+  "question": "How do I treat trench foot?",
+  "page": "Extremes of Temperature",
+  "facts": [
+   "trench foot",
+   "rewarming"
+  ]
+ },
+ {
+  "id": "h-altitude",
+  "set": "holdout",
+  "question": "How fast should I climb when sleeping at high altitude?",
+  "page": "High Elevation Travel",
+  "facts": [
+   "9,000|2,750"
+  ]
+ },
+ {
+  "id": "h-radiation",
+  "set": "holdout",
+  "question": "What should I do in a radiation emergency?",
+  "page": "Radiation Emergencies | Ready.gov",
+  "facts": [
+   "shelter|inside"
+  ]
+ },
+ {
+  "id": "h-snakebite",
+  "set": "holdout",
+  "question": "What should I do after a snakebite?",
+  "page": "Snakebite",
+  "facts": [
+   "antivenom|immobil|hospital"
+  ],
+  "forbid": [
+   "suck|tourniquet|cut the"
+  ]
+ },
+ {
+  "id": "h-stroke",
+  "set": "holdout",
+  "question": "How do I recognise a stroke?",
+  "page": "Stroke",
+  "facts": [
+   "face|arm|speech"
+  ]
+ },
+ {
+  "id": "h-heart-attack",
+  "set": "holdout",
+  "question": "What are the symptoms of a heart attack?",
+  "page": "Myocardial infarction",
+  "facts": [
+   "chest pain|chest discomfort"
+  ]
+ },
+ {
+  "id": "h-fracture",
+  "set": "holdout",
+  "question": "How should a broken arm be treated before reaching a doctor?",
+  "page": "Bone fracture",
+  "facts": [
+   "splint|immobili"
+  ]
+ },
+ {
+  "id": "h-ors",
+  "set": "holdout",
+  "question": "How do I make an oral rehydration drink?",
+  "page": "Oral rehydration therapy",
+  "facts": [
+   "salt",
+   "sugar|glucose"
+  ]
+ },
+ {
+  "id": "h-house-fire",
+  "set": "holdout",
+  "question": "How do I get out of a burning house?",
+  "page": "Home Fires | Ready.gov",
+  "facts": [
+   "smoke|escape"
+  ]
+ },
+ {
+  "id": "h-co-symptoms",
+  "set": "holdout",
+  "question": "What are the symptoms of carbon monoxide poisoning?",
+  "page": "Carbon monoxide poisoning",
+  "facts": [
+   "headache"
+  ]
+ },
+ {
+  "id": "h-tick",
+  "set": "holdout",
+  "question": "How do I remove a tick?",
+  "page": "Tick",
+  "facts": [
+   "tweezers|forceps"
+  ]
+ },
+ {
+  "id": "h-tornado",
+  "set": "holdout",
+  "question": "Where should I shelter during a tornado?",
+  "page": "Tornadoes | Ready.gov",
+  "facts": [
+   "lowest|basement|windows|interior"
+  ]
+ },
+ {
+  "id": "h-none-canberra",
+  "set": "holdout",
+  "question": "What is the capital of Australia?",
   "none": true
  },
  {
-  "id": "none-everest-de",
-  "question": "Wie hoch ist der Mount Everest?",
+  "id": "h-none-tire",
+  "set": "holdout",
+  "question": "How do I change a flat tire?",
+  "none": true
+ },
+ {
+  "id": "h-none-rust-de",
+  "set": "holdout",
+  "question": "Wie schreibe ich eine for-Schleife in Rust?",
+  "none": true
+ },
+ {
+  "id": "h-none-france",
+  "set": "holdout",
+  "question": "Who is the current president of France?",
+  "none": true
+ },
+ {
+  "id": "h-none-wallet-de",
+  "set": "holdout",
+  "question": "Wie funktioniert ein Bitcoin-Wallet?",
+  "none": true
+ },
+ {
+  "id": "h-none-dog",
+  "set": "holdout",
+  "question": "How do I train my dog to sit?",
   "none": true
  }
 ]
