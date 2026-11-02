@@ -288,6 +288,7 @@ mod tests {
             group: Some("sandbox".into()),
             map: None,
             ollama: None,
+            model_spec: None,
         }
     }
 

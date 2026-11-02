@@ -238,7 +238,7 @@ fn cross_check(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
             issue(format!("profile id {:?} is defined more than once", p.id));
         }
         for pkg in &p.packages {
-            if !deps.contains_key(pkg.as_str()) {
+            if pkg != crate::ai::AUTO_LLM && !deps.contains_key(pkg.as_str()) {
                 issue(format!("profile {}: unknown package {pkg:?}", p.id));
             }
         }
@@ -325,6 +325,7 @@ pub(crate) mod tests {
             group: None,
             service: None,
             content: None,
+            model: None,
         }
     }
 

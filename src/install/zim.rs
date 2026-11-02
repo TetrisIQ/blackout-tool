@@ -291,6 +291,7 @@ mod tests {
                 group: None,
                 map: None,
                 ollama: None,
+                model_spec: None,
             }
         }
 

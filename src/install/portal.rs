@@ -252,7 +252,7 @@ fn write_assistant(state: &State, dir: &Path) -> Result<(), super::InstallError>
     write_atomic(&ai.join("rag.js"), ASSISTANT_JS)?;
     write_atomic(
         &ai.join("config.json"),
-        &serde_json::json!({ "model": model.name }).to_string(),
+        &serde_json::json!({ "model": model.name, "thinking": model.thinking }).to_string(),
     )
 }
 
@@ -530,6 +530,7 @@ mod tests {
             name: "granite4.2:3b".into(),
             size: 1,
             by_kit: true,
+            thinking: true,
         });
         st.packages.insert("llm".into(), r);
         write(&paths, &st).unwrap();
@@ -546,7 +547,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(ai.join("config.json")).unwrap(),
-            r#"{"model":"granite4.2:3b"}"#
+            r#"{"model":"granite4.2:3b","thinking":true}"#
         );
         let front = render_page(&st, Origin::Front { host: "kit.local" });
         assert!(

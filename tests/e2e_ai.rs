@@ -125,6 +125,7 @@ fn the_front_serves_the_assistant_and_limits_the_ollama_api() {
                 name: model.clone(),
                 size: 1,
                 by_kit: false,
+                thinking: false,
             }),
         },
     );

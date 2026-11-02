@@ -150,7 +150,8 @@ mod tests {
         let http = FakeHttp::default().with("http://reg/v2/library/granite4.2/manifests/3b", body);
         let m: Manifest = serde_yaml_ng::from_str(
             "id: llm\nname: n\ndescription: d\ncategory: ai\ntype: model\n\
-             source: {ollama: {model: granite4.2, tag: 3b}}\nlicense: {spdx: Apache-2.0}\n",
+             source: {ollama: {model: granite4.2, tag: 3b}}\nlicense: {spdx: Apache-2.0}\n\
+             model: {context_k: 128}\n",
         )
         .unwrap();
         assert!(m.validate().is_empty(), "{:?}", m.validate());

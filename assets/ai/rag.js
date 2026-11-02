@@ -97,12 +97,19 @@
     return items.filter((i) => plain(i.title) === i.title || !have.has(plain(i.title)));
   }
 
+  // The search needs all terms to occur, so a long list finds nothing: try it, then the first 3 and 2.
+  function queryLadder(query) {
+    const w = query.split(' ').filter(Boolean);
+    return [...new Set([w.join(' '), w.slice(0, 3).join(' '), w.slice(0, 2).join(' ')])].filter((q) => q.length > 0);
+  }
+
   function keywordMessages(question) {
     return [
       {
         role: 'system',
         content:
-          'Turn the question into 3 to 6 English search keywords for an encyclopedia. ' +
+          'Turn the question into exactly 3 or 4 English search keywords for an encyclopedia, most important first. ' +
+          'Always use English words, even if the question is in another language. ' +
           'Answer with the keywords only, separated by spaces, no punctuation, no explanation.',
       },
       { role: 'user', content: question },
@@ -112,7 +119,7 @@
   // Model output -> a safe search string; falls back to the question itself.
   function cleanKeywords(output, question) {
     const words = (output || '').toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [];
-    const picked = words.slice(0, 8);
+    const picked = words.slice(0, 5);
     return picked.length >= 2 ? picked.join(' ') : terms(question).slice(0, 8).join(' ') || question;
   }
 
@@ -133,7 +140,7 @@
     ];
   }
 
-  const api = { dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
+  const api = { queryLadder, dropVariants, coverage, decodeEntities, parseSearch, htmlToText, terms, pickPassage, keywordMessages, cleanKeywords, buildMessages };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Rag = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

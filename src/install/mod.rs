@@ -181,6 +181,8 @@ pub struct InstallInput {
     pub map: Option<crate::catalog::manifest::MapRef>,
     /// `model` packages: the Ollama model and the size the registry reported.
     pub ollama: Option<crate::catalog::manifest::OllamaRef>,
+    /// `model` packages: what the assistant page may ask of it (reasoning).
+    pub model_spec: Option<crate::catalog::manifest::ModelSpec>,
 }
 
 #[derive(Debug, Clone)]

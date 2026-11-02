@@ -312,6 +312,7 @@ mod tests {
                 maxzoom: 12,
             }),
             ollama: None,
+            model_spec: None,
         }
     }
 

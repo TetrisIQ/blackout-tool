@@ -1,0 +1,13 @@
+id: llm_qwen35_9b
+name: Qwen3.5 9B (local assistant)
+description: "Larger model with reasoning (6.6 GB, 256K context). Needs a GPU with about 8 GB of VRAM or more, or 16 GB of RAM and patience."
+category: ai
+type: model
+source:
+  ollama: {model: qwen3.5, tag: 9b}
+license:
+  spdx: Apache-2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution: Alibaba Qwen team
+model: {context_k: 256, thinking: true}
+languages: [en, de]

@@ -83,6 +83,11 @@ pub enum Command {
     Verify(VerifyArgs),
     /// Show what is installed and whether the server runs
     Status(StatusArgs),
+    /// Show this machine's memory and graphics card and the local model that fits it
+    Hw {
+        #[arg(long)]
+        json: bool,
+    },
     /// Local HTTPS for the real domains (CA, Caddy, hosts); every step is reversible
     Net(crate::cli_net::NetArgs),
 }
@@ -314,7 +319,8 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::List { category, json } => list(&catalog, category.as_deref(), *json, out)?,
         Command::Show { id, json } => show(&catalog, id, *json, http, out)?,
         Command::Profiles { json } => profiles(&catalog, *json, out)?,
-        Command::Plan(args) => return plan_cmd(&catalog, args, http, space, out),
+        Command::Hw { json } => hw_cmd(&catalog, *json, env, out)?,
+        Command::Plan(args) => return plan_cmd(&catalog, args, http, space, env, out),
         Command::Download(args) => return download_cmd(&catalog, args, env, out),
         Command::Install(args) => return install_cmd(&catalog, args, env, out),
         Command::Uninstall(args) => return uninstall_cmd(args, env, out),
@@ -613,6 +619,99 @@ fn selection_from(catalog: &Catalog, profile: Option<&str>, select: &[String]) -
     }
 }
 
+/// Replaces `llm_auto` in the selection with the model that fits this machine, and says which.
+fn resolve_auto_model(
+    catalog: &Catalog,
+    selection: &mut Selection,
+    http: &dyn Http,
+    runner: &dyn CommandRunner,
+    out: &mut dyn Write,
+) -> Result<()> {
+    if !selection.ids.iter().any(|i| i == crate::ai::AUTO_LLM) {
+        return Ok(());
+    }
+    let hw = crate::hw::detect(&crate::hw::RealFiles, runner);
+    let resolver = LiveResolver::new(http);
+    if let Some(line) = crate::ai::expand_auto(&mut selection.ids, catalog, &resolver, &hw)? {
+        writeln!(out, "{line}")?;
+    }
+    Ok(())
+}
+
+fn hw_cmd(catalog: &Catalog, json: bool, env: &Env, out: &mut dyn Write) -> Result<()> {
+    let hw = crate::hw::detect(&crate::hw::RealFiles, env.runner);
+    let resolver = LiveResolver::new(env.http);
+    let (cands, warnings) = crate::ai::candidates(catalog, &resolver);
+    let choice = crate::ai::choose(&hw, &cands);
+    if json {
+        let rows: Vec<_> = cands
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id, "weights_bytes": c.weights_bytes,
+                    "working_set_bytes": c.working_set_bytes(),
+                    "thinking": c.thinking, "fits_fast": crate::ai::fits_fast(&hw, c),
+                })
+            })
+            .collect();
+        let recommended = choice.as_ref().ok().map(|c| c.id.clone());
+        let doc =
+            serde_json::json!({ "hw": hw, "models": rows, "recommended": recommended, "warnings": warnings });
+        writeln!(out, "{}", serde_json::to_string_pretty(&doc)?)?;
+        return Ok(());
+    }
+    writeln!(
+        out,
+        "CPU:  {} ({} threads{})",
+        hw.cpu_model,
+        hw.cpu_threads,
+        if hw.avx2 { ", AVX2" } else { "" }
+    )?;
+    writeln!(
+        out,
+        "RAM:  {} total, {} free",
+        format_bytes(hw.ram_total_bytes),
+        format_bytes(hw.ram_available_bytes)
+    )?;
+    if hw.gpus.is_empty() {
+        writeln!(out, "GPU:  none found (models run on the CPU)")?;
+    }
+    for g in &hw.gpus {
+        writeln!(out, "GPU:  {} with {}", g.name, format_bytes(g.vram_bytes))?;
+    }
+    writeln!(
+        out,
+        "\nLocal models (fast = runs entirely in GPU memory, or small enough for the CPU):"
+    )?;
+    for c in &cands {
+        writeln!(
+            out,
+            "  {:<16} {:>9}  needs ~{:>9}  {}{}",
+            c.id,
+            format_bytes(c.weights_bytes),
+            format_bytes(c.working_set_bytes()),
+            if crate::ai::fits_fast(&hw, c) {
+                "fast"
+            } else {
+                "too big for fast answers"
+            },
+            if c.thinking { ", can reason" } else { "" }
+        )?;
+    }
+    for w in &warnings {
+        writeln!(out, "  note: {w}")?;
+    }
+    match choice {
+        Ok(c) => writeln!(
+            out,
+            "\nRecommended: {} - {}\nInstall it with: kit install --select {}",
+            c.id, c.reason, c.id
+        )?,
+        Err(e) => writeln!(out, "\nNo recommendation: {e}")?,
+    }
+    Ok(())
+}
+
 /// Prints one status line per second on a terminal, or every 10 s when output is a log.
 struct StderrProgress {
     tty: bool,
@@ -787,7 +886,8 @@ fn fetch(
 }
 
 fn download_cmd(catalog: &Catalog, args: &DownloadArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
-    let selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    let mut selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    resolve_auto_model(catalog, &mut selection, env.http, env.runner, out)?;
     let data_dir = data_dir_of(&args.data_dir)?;
     let resolver = LiveResolver::new(env.http);
     let plan = plan::build(catalog, &selection, &resolver, env.space, &data_dir)?;
@@ -875,6 +975,7 @@ fn install_input(
         group: manifest.group.clone(),
         map: manifest.source.map.clone(),
         ollama: manifest.source.ollama.clone(),
+        model_spec: manifest.model.clone(),
     }
 }
 
@@ -902,7 +1003,8 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
 }
 
 fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
-    let selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    let mut selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    resolve_auto_model(catalog, &mut selection, env.http, env.runner, out)?;
     let data_dir = data_dir_of(&args.data_dir)?;
     let paths = paths_for(env, data_dir.clone())?;
     // A short look at the state; the lock is only held while installing, not while downloading.
@@ -1151,9 +1253,11 @@ fn plan_cmd(
     args: &PlanArgs,
     http: &dyn Http,
     space: &dyn FreeSpace,
+    env: &Env,
     out: &mut dyn Write,
 ) -> Result<Outcome> {
-    let selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    let mut selection = selection_from(catalog, args.profile.as_deref(), &args.select)?;
+    resolve_auto_model(catalog, &mut selection, http, env.runner, out)?;
     let data_dir = match &args.data_dir {
         Some(d) => d.clone(),
         None => xdg_dir("XDG_DATA_HOME", "")?,

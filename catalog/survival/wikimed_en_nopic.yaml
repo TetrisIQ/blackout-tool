@@ -1,0 +1,12 @@
+id: wikimed_en_nopic
+name: WikiMed (medical encyclopedia, no pictures)
+description: "Wikipedia's medical articles: conditions, treatments, first aid."
+category: survival
+type: zim
+source:
+  kiwix: {name: wikipedia_en_medicine, flavour: nopic, lang: eng}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [en]

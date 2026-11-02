@@ -72,6 +72,20 @@ impl OllamaRef {
     }
 }
 
+/// What the automatic model choice needs to know about a `model` package.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSpec {
+    /// The model can reason before it answers (Ollama's `think`).
+    #[serde(default)]
+    pub thinking: bool,
+    /// Context window in thousands of tokens as published by the model's maker.
+    pub context_k: u32,
+}
+
+/// Models with a smaller window cannot hold a few library passages plus a question.
+pub const MIN_CONTEXT_K: u32 = 32;
+
 /// A map region: a bounding box cut out of the newest Protomaps build.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -234,6 +248,9 @@ pub struct Manifest {
     /// Required for `container` packages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<ServiceSpec>,
+    /// Required for `model` packages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelSpec>,
     /// Required for `files` packages that feed a service.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<ContentSpec>,
@@ -382,6 +399,21 @@ impl Manifest {
             }
             (Some(_), _) => errs.push("service is only valid for type container".into()),
             (None, PackageType::Container) => errs.push("type container needs a service block".into()),
+            (None, _) => {}
+        }
+        match (&self.model, self.kind) {
+            (Some(m), PackageType::Model) => {
+                if m.context_k < MIN_CONTEXT_K {
+                    errs.push(format!(
+                        "model.context_k {} is below the minimum of {MIN_CONTEXT_K} (the library passages would not fit)",
+                        m.context_k
+                    ));
+                }
+            }
+            (Some(_), _) => errs.push("model is only valid for type model".into()),
+            (None, PackageType::Model) => {
+                errs.push("type model needs a model block (context_k, thinking)".into())
+            }
             (None, _) => {}
         }
         if let Some(c) = &self.content {
@@ -917,7 +949,7 @@ license: {{spdx: ODbL-1.0}}
 
     #[test]
     fn model_manifest_rules() {
-        let base = "id: m\nname: M\ndescription: d\ncategory: ai\ntype: model\nlicense: {spdx: Apache-2.0}\n";
+        let base = "id: m\nname: M\ndescription: d\ncategory: ai\ntype: model\nlicense: {spdx: Apache-2.0}\nmodel: {context_k: 128, thinking: true}\n";
         let ok = parse(&format!(
             "{base}source: {{ollama: {{model: granite4.2, tag: 3b}}}}"
         ))

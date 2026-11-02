@@ -16,6 +16,10 @@
   .src { font-size: .85rem; margin-top: .3rem; }
   .src a { margin-right: .8rem; }
   .status { font-size: .85rem; opacity: .75; }
+  .timing { font-size: .8rem; opacity: .7; margin-top: .2rem; }
+  details.think { font-size: .85rem; opacity: .8; }
+  details.think pre { white-space: pre-wrap; margin: .3rem 0; font-family: inherit; }
+  label.deep { font-size: .9rem; display: flex; align-items: center; gap: .3rem; white-space: nowrap; }
   form { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: .5rem; padding: .6rem 1rem;
          background: Canvas; border-top: 1px solid; max-width: 46rem; margin: 0 auto; box-sizing: border-box; }
   input { flex: 1; font-size: 1.1rem; padding: .4rem; }
@@ -35,6 +39,7 @@
 <div id="log"></div>
 <form id="form">
   <input id="q" type="text" autocomplete="off" placeholder="Ask a question" required autofocus>
+  <label class="deep" id="deepbox" hidden><input type="checkbox" id="deep"> Think harder</label>
   <button id="go" type="submit">Ask</button>
 </form>
 <script src="rag.js"></script>
@@ -46,6 +51,8 @@
   const go = document.getElementById('go');
   const history = [];
   let model = null;
+  let thinking = false;
+  const deep = document.getElementById('deep');
 
   const el = (tag, cls, text) => {
     const e = document.createElement(tag);
@@ -55,8 +62,11 @@
   };
 
   try {
-    model = (await (await fetch('config.json')).json()).model;
+    const cfg = await (await fetch('config.json')).json();
+    model = cfg.model;
+    thinking = !!cfg.thinking;
     document.getElementById('model').textContent = model;
+    document.getElementById('deepbox').hidden = !thinking;
   } catch (e) {
     log.append(el('p', 'status', 'No assistant is installed.'));
     go.disabled = true;
@@ -66,14 +76,14 @@
   const chat = (body) => fetch('api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // think: false - the hidden reasoning would use up the short answer budget and delay the first word.
+    // think defaults to false: hidden reasoning would use up the short answer budget and delay the first word.
     body: JSON.stringify({ model, keep_alive: '30m', think: false, ...body }),
   });
 
   async function keywords(question) {
     try {
       const r = await chat({ stream: false, messages: Rag.keywordMessages(question),
-                             options: { temperature: 0, num_predict: 24, num_ctx: 2048 } });
+                             options: { temperature: 0, num_predict: 24, num_ctx: 8192 } });
       return Rag.cleanKeywords((await r.json()).message.content, question);
     } catch (e) {
       return Rag.cleanKeywords('', question);
@@ -81,20 +91,26 @@
   }
 
   // `query` is the English keyword string: the library is English, the question may not be.
+  // `query` is the English keyword string: the library is English, the question may not be.
+  // Returns the passages and the search string that found them.
   async function passages(query) {
-    const r = await fetch('/search?format=xml&pageLength=6&pattern=' + encodeURIComponent(query));
-    const hits = Rag.dropVariants(Rag.parseSearch(await r.text())).slice(0, 4);
-    const out = [];
-    for (const h of hits) {
-      try {
-        const page = await (await fetch(h.href)).text();
-        out.push({ title: h.title, href: h.href, text: Rag.pickPassage(Rag.htmlToText(page), query, 1400) });
-      } catch (e) {
-        out.push({ title: h.title, href: h.href, text: h.snippet });
+    for (const q of Rag.queryLadder(query)) {
+      const r = await fetch('/search?format=xml&pageLength=8&pattern=' + encodeURIComponent(q));
+      const hits = Rag.dropVariants(Rag.parseSearch(await r.text())).slice(0, 4);
+      const out = [];
+      for (const h of hits) {
+        try {
+          const page = await (await fetch(h.href)).text();
+          out.push({ title: h.title, href: h.href, text: Rag.pickPassage(Rag.htmlToText(page), q, 1400) });
+        } catch (e) {
+          out.push({ title: h.title, href: h.href, text: h.snippet });
+        }
       }
+      // Keep passages that mention at least half of the search terms (title included).
+      const kept = out.filter((p) => p.text.length > 0 && Rag.coverage(p.title + ' ' + p.text, q) >= 0.5);
+      if (kept.length > 0) return { found: kept, used: q };
     }
-    // Keep passages that mention at least half of the search terms (title included).
-    return out.filter((p) => p.text.length > 0 && Rag.coverage(p.title + ' ' + p.text, query) >= 0.5);
+    return { found: [], used: query };
   }
 
   form.addEventListener('submit', async (ev) => {
@@ -107,15 +123,25 @@
     const status = el('div', 'status', 'Searching the library ...');
     const answer = el('div', 'a');
     const src = el('div', 'src');
-    turn.append(el('div', 'q', question), status, answer, src);
+    const timing = el('div', 'timing');
+    const reasoning = deep.checked && thinking;
+    const thought = el('details', 'think');
+    thought.hidden = true;
+    thought.append(el('summary', '', 'Reasoning'), el('pre'));
+    turn.append(el('div', 'q', question), status, thought, answer, src, timing);
+    const t0 = performance.now();
+    const secs = (t) => ((t - t0) / 1000).toFixed(1) + ' s';
+    let tSearch = 0, tFirst = 0;
     log.append(turn);
     try {
       const query = await keywords(question);
-      const found = await passages(query);
+      const { found, used } = await passages(query);
+      tSearch = performance.now();
       if (found.length === 0) {
         status.textContent = '';
-        answer.textContent = 'Nothing about this was found in the installed library (searched: ' + query + '). ' +
+        answer.textContent = 'Nothing about this was found in the installed library (searched: ' + used + '). ' +
           'No answer is given without a source.';
+        timing.textContent = 'Search took ' + secs(tSearch) + '; no model call.';
         return;
       }
       status.textContent = 'Answering from ' + found.length + ' passage' + (found.length > 1 ? 's' : '') + ' ...';
@@ -126,11 +152,12 @@
         src.append(a);
       });
       const resp = await chat({ stream: true, messages: Rag.buildMessages(question, found, history),
-                                options: { temperature: 0.2, num_ctx: 8192, num_predict: 700 } });
+                                think: reasoning,
+                                options: { temperature: 0.2, num_ctx: 8192, num_predict: reasoning ? 3000 : 700 } });
       if (!resp.ok) throw new Error('assistant answered ' + resp.status);
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      let buf = '', full = '';
+      let buf = '', full = '', stats = null;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -141,13 +168,27 @@
           buf = buf.slice(nl + 1);
           if (!line) continue;
           const part = JSON.parse(line);
+          if (part.message && part.message.thinking) {
+            thought.hidden = false;
+            thought.querySelector('pre').textContent += part.message.thinking;
+            status.textContent = 'Reasoning ...';
+          }
           if (part.message && part.message.content) {
+            if (!tFirst) tFirst = performance.now();
             full += part.message.content;
             answer.textContent = full;
             status.textContent = '';
           }
+          if (part.done) stats = part;
         }
       }
+      const end = performance.now();
+      let line = 'Answered in ' + secs(end) + ' (search ' + secs(tSearch) + ', first word ' + secs(tFirst || end) + ')';
+      if (stats && stats.eval_count && stats.eval_duration) {
+        line += ', ' + stats.eval_count + ' tokens at ' + (stats.eval_count / (stats.eval_duration / 1e9)).toFixed(0) + ' tokens/s';
+      }
+      timing.textContent = line + (reasoning ? ', with reasoning' : '');
+      console.log('assistant timing:', line);
       history.push({ role: 'user', content: question }, { role: 'assistant', content: full });
       if (history.length > 6) history.splice(0, 2);
     } catch (e) {

@@ -17,4 +17,4 @@ packages:
   - luanti
   - gnome_mines
   - map_berlin
-  - llm_granite_3b
+  - llm_auto

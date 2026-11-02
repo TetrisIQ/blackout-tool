@@ -129,6 +129,7 @@ impl Installer for ModelInstaller {
                     name: name.clone(),
                     size: input.size,
                     by_kit,
+                    thinking: input.model_spec.as_ref().is_some_and(|m| m.thinking),
                 }),
             },
         );
@@ -248,6 +249,10 @@ mod tests {
             ollama: Some(OllamaRef {
                 model: "granite4.2".into(),
                 tag: "3b".into(),
+            }),
+            model_spec: Some(crate::catalog::manifest::ModelSpec {
+                thinking: true,
+                context_k: 128,
             }),
         }
     }

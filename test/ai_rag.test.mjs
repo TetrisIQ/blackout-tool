@@ -39,6 +39,10 @@ assert.deepEqual(
   ['Pacman', 'Mirrors', 'Mercury (element)', 'Mercury (planet)'],
 );
 
+assert.deepEqual(R.queryLadder('a b c d e'), ['a b c d e', 'a b c', 'a b']);
+assert.deepEqual(R.queryLadder('a b'), ['a b']);
+assert.deepEqual(R.queryLadder('a'), ['a']);
+
 const msgs = R.buildMessages('Q?', [{ title: 'T', text: 'body' }], [{ role: 'user', content: 'earlier' }]);
 assert.equal(msgs[0].role, 'system');
 assert.ok(msgs[0].content.includes('[1] T\nbody') && msgs[0].content.includes('Never invent'));

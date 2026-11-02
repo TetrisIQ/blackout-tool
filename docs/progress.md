@@ -176,7 +176,7 @@ Found by the first real install of the test profile: no login, no library.
 - **Real run (Ollama 0.40.13, 8 GB GPU, temp data dir):** `kit install --select llm_granite_3b` pulled the model in 24 s, `kit verify` passed, `ollama list` shows it. Not yet run for real: `kit uninstall` (`ollama rm`).
 - `ollama pull` output is captured, so a 2.2 GB pull shows no progress bar in `kit install`.
 - **Safety:** Survival LLM's own evaluation found Granite 4.2 3B gave harmful first-aid answers (5 of 22). It is a speed-first starting point, not a recommendation; the evaluation gate and grounding in the Kiwix library (plan slices 5 and 6) come before it ships in a profile as the default. Meanwhile it is in `standard` and `full` so it can be tested.
-- Not done yet from the plan: `kit hw` detection, automatic model choice, thinking model, chat page, engine tarball fallback.
+- Not done yet from the plan: engine tarball fallback (see the fifth slice for the rest).
 
 ### First real answers (granite4.2:3b, 8 GB GPU, 100 % on GPU, 4096 context)
 - Speed: 88 tok/s; a 165-token answer took 3.2 s (1.1 s of it loading), a 1,061-token answer 12.2 s.
@@ -195,3 +195,27 @@ Found by the first real install of the test profile: no login, no library.
 - **A 3B model still invents details even with passages**, and ignores the "language of the question" rule at times. The page cannot fix that; a larger model (e.g. `qwen3.5:4b` / `9b`) and the evaluation gate are the next steps. Relevance filtering is by term overlap only.
 - Library content is whatever ZIMs are installed (the test used ArchWiki only), so first-aid questions return "nothing found" there; the Standard profile has the medical/survival sources.
 - Needs `kit net enable` (root steps) to be reachable from a browser; the `file://` portal only names `ollama run`.
+
+## Phase 7 - fifth slice: `kit hw`, automatic model choice, survival ZIMs, answer timing
+- **`kit hw [--json]`** (`src/hw.rs`): reads `/proc/meminfo`, `/proc/cpuinfo`, `nvidia-smi` and AMD cards from `/sys/class/drm` (integrated graphics are not counted); parsers are pure and tested with recorded text. On the dev machine: Ryzen 5 5600, 33.6 GB RAM, **AMD GPU with 8.6 GB** (not NVIDIA).
+- **Automatic choice** (`src/ai.rs`, `llm_auto` in `--select` and in the `test`/`standard`/`full` profiles, replaces `llm_granite_3b`): the largest model whose working set (weights x 1.25 + 0.5 GB, sizes live from the registry) fits 95 % of the GPU's memory; without a usable GPU only models up to 3.5 GB (quick on a CPU) that fit 60 % of the free RAM; a bigger one is chosen only as "slow but possible"; otherwise an error naming `--select`. The choice and the reason are printed by `plan`, `download` and `install`. Here: `llm_auto -> llm_qwen35_4b`. Manifests of type `model` now need `model: {context_k, thinking}`; `context_k` below 32 is rejected (a few library passages would not fit).
+- **New models:** `llm_qwen35_4b` (3.3 GB) and `llm_qwen35_9b` (6.6 GB), both 256K context, can reason, Apache-2.0 (licence layer read from the registry).
+- **Survival ZIMs** (`catalog/survival/`, in `standard` and `full`): WikiMed (no pictures, 1.05 GB), Ready.gov (2.06 GB), NHS medicines (15 MB, OGL-UK-3.0), USDA canning (20 MB), CDC Travelers' Health (178 MB); 3.3 GB, downloaded and verified into a temp dir and served by a scratch kiwix-serve. Left out on purpose: military medicine (reprints copyrighted volumes), MedlinePlus (partly third-party licensed).
+- **Page:** shows the time of every answer (total, search, first word, tokens/s; also in the console), has a "Think harder" switch for models that can reason (`config.json` carries `thinking`), searches again with fewer terms when the full keyword list finds nothing (the search needs all terms), and asks for exactly 3-4 English keywords.
+- **Found by measuring:** the keyword call used `num_ctx` 2048 and the answer call 8192, so Ollama reloaded the model between them (about 6 s per question). One context size for both removed it.
+
+### Results (survival ZIMs, 8.6 GB AMD GPU, all on the GPU unless noted; same page logic replayed in node)
+| | granite4.2:3b | qwen3.5:4b | qwen3.5:9b |
+|---|---|---|---|
+| speed | 84 tok/s | 28 tok/s | 17 tok/s (17 % on CPU) |
+| typical answer time | 7-12 s | 4.6-8 s (first question +6 s model load) | 6-9.5 s |
+| answer quality | leaks its reasoning into the answer, rambles | clean, concise, cites passages, German question answered in German | same as 4B, slower |
+- Prompt processing of the ~1,300-token context takes 2.5 s on the 4B model and is now the largest fixed cost; fewer or shorter passages would cut it.
+- Facts checked against the passages: burn (cool running water 10-20 min was in one run; other runs quoted WikiMed on friction burns, which is the wrong burn), downed power line (all models say the passages give no distance, none invent one), fridge during an outage (four hours, correct), boiling water (1 min, 3 min above 2,000 m, correct).
+- **Reasoning mode ("Think harder")** took 45 s and 99 s (1,000 to 2,400 thinking tokens) with no better answer; it stays off by default.
+
+### Caveats
+- **Retrieval is the weak point now:** Kiwix search needs every term, and the model's keywords vary. "How do I make water safe to drink in an emergency?" found nothing although Ready.gov has a Water page ("boil water" finds it). The minor-burn question retrieves friction-burn pages instead of the general burn first aid. A better ranking (title match boost, trying alternative keyword sets) is the next step.
+- The assistant page itself (rendering, streaming, timing line, "Think harder") has not been opened in a browser; the logic is tested in node and the plumbing with Caddy + curl.
+- No evaluation set yet: the questions above are a smoke test of five questions, not a safety evaluation.
+- The ZIMs for this test sit in a scratch directory; no installation on the host was changed (`ollama serve` runs as the user, the models live in `~/.ollama`).

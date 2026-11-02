@@ -32,4 +32,9 @@ packages:
   - gnome_chess
   - aisleriot
   - map_germany
-  - llm_granite_3b
+  - llm_auto
+  - wikimed_en_nopic
+  - readygov_en
+  - nhs_medicines_en
+  - usda_canning_en
+  - cdc_travelers_en

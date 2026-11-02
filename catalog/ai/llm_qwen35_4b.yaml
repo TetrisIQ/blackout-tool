@@ -1,0 +1,13 @@
+id: llm_qwen35_4b
+name: Qwen3.5 4B (local assistant)
+description: "Small model that can think before it answers (3.3 GB, 256K context). A step up from the 3B model, still quick on a CPU or a small GPU."
+category: ai
+type: model
+source:
+  ollama: {model: qwen3.5, tag: 4b}
+license:
+  spdx: Apache-2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution: Alibaba Qwen team
+model: {context_k: 256, thinking: true}
+languages: [en, de]

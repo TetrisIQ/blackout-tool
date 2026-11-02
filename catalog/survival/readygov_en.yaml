@@ -1,0 +1,12 @@
+id: readygov_en
+name: Ready.gov (FEMA)
+description: "Emergency preparedness by hazard: power outages, floods, fires, shelter, supplies."
+category: survival
+type: zim
+source:
+  kiwix: {name: ready.gov_en_all, lang: eng}
+license:
+  spdx: LicenseRef-Public-Domain-US
+  url: https://www.fema.gov/about/openfema/terms-conditions
+  attribution: FEMA / U.S. Department of Homeland Security
+languages: [en]

@@ -72,6 +72,9 @@ pub struct ModelRecord {
     pub size: u64,
     /// kit pulled it, so kit removes it again. A model that was there before stays.
     pub by_kit: bool,
+    /// The model can reason before answering; the assistant page offers a switch for it.
+    #[serde(default)]
+    pub thinking: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
