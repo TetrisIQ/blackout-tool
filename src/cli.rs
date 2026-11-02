@@ -946,8 +946,12 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
     }
     if item.kind == crate::catalog::PackageType::Map {
         // The region comes from whichever build was newest at install time; it is kept until
-        // the user reinstalls (updates are Phase 10).
-        return r.map.is_some() && paths.maps_dir().join(format!("{}.pmtiles", item.id)).exists();
+        // the user reinstalls (updates are Phase 10). A map without its place index is not
+        // current: running the installer again builds it (maps installed before the search).
+        let dir = paths.maps_dir();
+        return r.map.is_some()
+            && dir.join(format!("{}.pmtiles", item.id)).exists()
+            && dir.join(install::map::places_name(&item.id)).exists();
     }
     r.files.len() == 1
         && Some(&r.files[0].sha256) == item.sha256.as_ref()
@@ -1030,7 +1034,17 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
         }
     }
     // Fail before downloading gigabytes if installing cannot work.
-    let kinds: Vec<_> = plan.items.iter().map(|i| i.kind).collect();
+    // (A map that only lacks its place index is rebuilt from the file; that needs no tool.)
+    let kinds: Vec<_> = plan
+        .items
+        .iter()
+        .filter(|i| {
+            i.kind != crate::catalog::PackageType::Map
+                || !paths.maps_dir().join(format!("{}.pmtiles", i.id)).exists()
+                || !prior.packages.contains_key(&i.id)
+        })
+        .map(|i| i.kind)
+        .collect();
     ensure_tools_for(&ctx, &kinds, !prior.library_files().is_empty())?;
 
     for item in plan

@@ -14,11 +14,21 @@
   select, button { font-size: 1rem; padding: .3rem .6rem; }
   #map { flex: 1; min-height: 12rem; }
   #msg { padding: .5rem 1rem; }
+  #find { position: relative; flex: 1 1 14rem; max-width: 24rem; }
+  #q { width: 100%; box-sizing: border-box; font-size: 1rem; padding: .3rem .6rem; }
+  #hits { position: absolute; z-index: 1000; left: 0; right: 0; top: 100%; margin: 0; padding: 0;
+          list-style: none; max-height: 50vh; overflow: auto; background: Canvas; color: CanvasText;
+          border: 1px solid GrayText; }
+  #hits li { padding: .35rem .6rem; cursor: pointer; }
+  #hits li:hover, #hits li.on { background: Highlight; color: HighlightText; }
+  #hits small { opacity: .7; }
 </style>
 </head>
 <body>
 <header>
   <a href="/">Offline kit</a>
+  <div id="find"><input id="q" type="search" placeholder="Search a place" autocomplete="off" hidden>
+    <ul id="hits" hidden></ul></div>
   <label>Region <select id="region"></select></label>
   <button id="locate" type="button">My position</button>
 </header>
@@ -56,8 +66,51 @@
     map.setMaxZoom(r.maxzoom);
     map.fitBounds([[s, w], [n, e]]);
   }
-  select.addEventListener('change', () => show(select.value));
+  select.addEventListener('change', () => { show(select.value); loadPlaces(); });
   show(0);
+
+  // Place search: a list of named places per region, read on first use, searched in memory.
+  const q = document.getElementById('q'), hits = document.getElementById('hits');
+  const zoomFor = { country: 5, region: 7, city: 11, town: 12, village: 13, hamlet: 13 };
+  let places = [];
+  async function loadPlaces() {
+    places = [];
+    const r = regions[select.value];
+    q.hidden = !r.places;
+    if (!r.places) return;
+    try { places = await (await fetch(r.places)).json(); } catch (e) { q.hidden = true; }
+  }
+  const norm = (t) => t.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  function search() {
+    const t = norm(q.value.trim());
+    hits.replaceChildren();
+    if (!t) { hits.hidden = true; return; }
+    const starts = [], inside = [];
+    for (const p of places) {                       // places are sorted biggest first
+      const n = norm(p[0]);
+      if (n.startsWith(t)) starts.push(p); else if (n.includes(t)) inside.push(p);
+      if (starts.length >= 8) break;
+    }
+    for (const p of starts.concat(inside).slice(0, 8)) {
+      const li = document.createElement('li');
+      li.textContent = p[0] + ' ';
+      const small = document.createElement('small');
+      small.textContent = p[3];
+      li.append(small);
+      li.addEventListener('click', () => {
+        map.setView([p[2], p[1]], Math.min(zoomFor[p[3]] || 13, map.getMaxZoom()));
+        hits.hidden = true; q.value = p[0];
+      });
+      hits.append(li);
+    }
+    hits.hidden = !hits.children.length;
+  }
+  q.addEventListener('input', search);
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && hits.firstChild) hits.firstChild.click();
+    if (e.key === 'Escape') hits.hidden = true;
+  });
+  loadPlaces();
 
   let marker = null;
   document.getElementById('locate').addEventListener('click', () => {

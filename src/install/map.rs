@@ -56,6 +56,35 @@ fn file_name(id: &str) -> String {
     format!("{id}.pmtiles")
 }
 
+/// File name of the place-name index next to the map (see `geocode`).
+pub fn places_name(id: &str) -> String {
+    format!("{id}.places.json")
+}
+
+/// Builds the place-name index of an installed map unless it is there and newer than the map.
+/// The map works without it (only the search box is missing), so a failure is a note, not an error.
+fn ensure_places(ctx: &Ctx, id: &str) -> Option<String> {
+    let dir = ctx.paths.maps_dir();
+    let (map, index) = (dir.join(file_name(id)), dir.join(places_name(id)));
+    let modified = |p: &Path| fs::metadata(p).and_then(|m| m.modified()).ok();
+    if let (Some(m), Some(i)) = (modified(&map), modified(&index))
+        && i >= m
+    {
+        return None;
+    }
+    let result = crate::geocode::places_json(&map)
+        .map_err(|e| e.to_string())
+        .and_then(|json| {
+            let part = dir.join(format!("{}.part", places_name(id)));
+            fs::write(&part, json)
+                .and_then(|()| fs::rename(&part, &index))
+                .map_err(|e| format!("cannot write {}: {e}", index.display()))
+        });
+    result
+        .err()
+        .map(|e| format!("{id}: the place search is not available ({e}); the map itself works"))
+}
+
 /// `--bbox=west,south,east,north`; `{}` on an `f64` prints the shortest exact form.
 fn bbox_arg(m: &MapRef) -> String {
     let [w, s, e, n] = m.bbox;
@@ -107,8 +136,9 @@ impl Installer for MapInstaller {
         let dir = ctx.paths.maps_dir();
         let dest = dir.join(file_name(&input.id));
         if state.packages.contains_key(&input.id) && dest.exists() {
+            let note = ensure_places(ctx, &input.id);
             super::portal::write(&ctx.paths, state)?;
-            return Ok(vec![]);
+            return Ok(note.into_iter().collect());
         }
         let tool = require("pmtiles", &ctx.search_path)?;
         let tool = s(&tool);
@@ -172,12 +202,15 @@ impl Installer for MapInstaller {
             },
         );
         state.save()?;
+        let note = ensure_places(ctx, &input.id);
         super::portal::write(&ctx.paths, state)?;
-        Ok(vec![
+        let mut notes = vec![
             "maps are shown by the portal at https://kit.local/maps/ (run `kit net enable`); \
              a file:// page cannot read them"
                 .into(),
-        ])
+        ];
+        notes.extend(note);
+        Ok(notes)
     }
 
     fn verify(&self, record: &Record, ctx: &Ctx, deep: bool) -> Vec<Check> {
@@ -234,6 +267,7 @@ impl Installer for MapInstaller {
                 Err(e) => return Err(io_err("cannot remove", &path)(e)),
             }
         }
+        let _ = fs::remove_file(ctx.paths.maps_dir().join(places_name(id)));
         let _ = fs::remove_dir(ctx.paths.maps_dir());
         super::portal::write(&ctx.paths, state)?;
         Ok(vec![])
@@ -375,6 +409,31 @@ mod tests {
         assert_eq!(r.count("extract"), 1);
         let plan = MapInstaller.plan(&input(), &ctx, &g).unwrap();
         assert!(plan[0].contains("already installed"));
+    }
+
+    #[test]
+    fn the_place_index_is_built_once_and_removed_with_the_map() {
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/maps/mitte.pmtiles");
+        let e = Env::new(true);
+        let (r, p) = (pmtiles(true), http());
+        let ctx = e.ctx(&r, &p);
+        let mut g = StateGuard::open(&e.paths).unwrap();
+        // The fake `pmtiles` writes junk: the install works, the search is reported as missing.
+        let notes = MapInstaller.install(&input(), &ctx, &mut g).unwrap();
+        let index = e.paths.maps_dir().join("map_test.places.json");
+        assert!(
+            notes.iter().any(|n| n.contains("place search is not available")),
+            "{notes:?}"
+        );
+        assert!(!index.exists());
+        // A real map file: the next run (also a no-op install) builds the index and links it.
+        fs::copy(fixture, e.paths.maps_dir().join("map_test.pmtiles")).unwrap();
+        assert!(MapInstaller.install(&input(), &ctx, &mut g).unwrap().is_empty());
+        assert!(fs::read_to_string(&index).unwrap().contains("\"Mitte\""));
+        let regions = fs::read_to_string(e.paths.portal_dir().join("maps/regions.json")).unwrap();
+        assert!(regions.contains("/maps/data/map_test.places.json"), "{regions}");
+        MapInstaller.uninstall("map_test", &ctx, &mut g, false).unwrap();
+        assert!(!index.exists());
     }
 
     #[test]

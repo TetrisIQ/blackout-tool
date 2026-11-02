@@ -161,7 +161,7 @@ Found by the first real install of the test profile: no login, no library.
 ### Caveats
 - **Sizes measured** (go-pmtiles 1.31.2, build 20261102, `extract --dry-run`): Berlin zoom 14 is 31 MB (was guessed 200 MB), Germany zoom 13 is 1.8 GB (was guessed 2.5 GB); manifests corrected. Sizes grow with newer builds, so they stay estimates.
 - **Checked for real:** `pmtiles extract` of Berlin against the live build plus `pmtiles verify`; `kit install --select map_berlin` with temp data/XDG dirs; the viewer in headless Firefox served by `caddy file-server` (206 Partial Content, symlink, roads, water, labels and attribution render). Not checked: Chromium, the full path through `kit net enable` (HTTPS), the Germany extract, geolocation.
-- **The viewer shows no search/routing**, only panning, zoom, region switch and the browser's geolocation.
+- **The viewer shows no routing**, only panning, zoom, region switch, the place search (next section) and the browser's geolocation.
 - Still open in Phase 7: local LLM (`survival-llm` is a desktop app around Ollama with its own library, not a model; plan is Ollama/llama.cpp as a service plus Kiwix search), hardware check, Whisper/translation, apt/pip mirror subset.
 
 ## Phase 7 - third slice: first local model (Granite 4.2 3B through Ollama)
@@ -219,3 +219,11 @@ Found by the first real install of the test profile: no login, no library.
 - The assistant page itself (rendering, streaming, timing line, "Think harder") has not been opened in a browser; the logic is tested in node and the plumbing with Caddy + curl.
 - No evaluation set yet: the questions above are a smoke test of five questions, not a safety evaluation.
 - The ZIMs for this test sit in a scratch directory; no installation on the host was changed (`ollama serve` runs as the user, the models live in `~/.ollama`).
+
+## Phase 7 - fourth slice: place search in the map viewer
+- **What it finds:** named places (cities, towns, villages, suburbs, neighbourhoods), not streets or house numbers. Protomaps tiles have no search data, but their `places` layer lists every named place as a point. `geocode` reads it from the installed `.pmtiles` (PMTiles v3 reader and a small vector-tile decoder, no tool needed, new dependency `flate2` for gzip) at zoom 12, merges repeats from neighbouring tiles and writes `<data-dir>/maps/<id>.places.json` (`[name, lon, lat, kind, population]`, biggest first). German and English forms are separate entries, so "Munich" finds München.
+- **When:** built by `kit install` after the map; a map installed before this slice gets its index on the next `kit install --select <id>` (a map without index is not "current"; that run needs no `pmtiles`). A failed index is only a note, the map keeps working. Uninstall removes it.
+- **Viewer:** search box next to the region switch, accent-insensitive, prefix matches first, click or Enter flies to the place. The portal links the index as `/maps/data/<id>.places.json` and lists it in `regions.json`.
+- **Measured on real data:** Berlin 1,378 places, 71 KB; Germany 335,900 places, 16 MB, built in 3 s. Searched in the browser with headless Firefox ("kreuzb" finds Kreuzberg and moves the map).
+- **Tests:** 270 unit tests (new: Hilbert tile ids from the spec, varints, dedupe, the reader against a 400 KB real extract in `tests/fixtures/maps/mitte.pmtiles`, installer builds/links/removes the index).
+- **Caveats:** no street or address search (would need the `roads` layer with names, which is far bigger, or a Nominatim/Photon service as a heavy package); the 16 MB Germany list is parsed in the browser on first use; only checked in Firefox.

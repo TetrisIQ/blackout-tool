@@ -309,16 +309,23 @@ const VENDOR: [(&str, &str); 3] = [
 ];
 
 /// `regions.json` for the viewer: name, file URL and bounds of every installed map.
-fn render_regions(state: &State) -> String {
+fn render_regions(paths: &Paths, state: &State) -> String {
     let regions: Vec<_> = state
         .maps()
         .into_iter()
         .filter_map(|(r, m)| {
             let f = r.files.first()?;
+            let places = super::map::places_name(&r.id);
+            let places = paths
+                .maps_dir()
+                .join(&places)
+                .exists()
+                .then(|| format!("/maps/data/{places}"));
             Some(serde_json::json!({
                 "id": r.id,
                 "name": r.name,
                 "file": format!("/maps/data/{}", f.name),
+                "places": places,
                 "bbox": m.bbox,
                 "maxzoom": m.maxzoom,
             }))
@@ -346,7 +353,7 @@ fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::Ins
     for (name, text) in VENDOR {
         write_atomic(&vendor.join(name), text)?;
     }
-    write_atomic(&maps.join("regions.json"), &render_regions(state))?;
+    write_atomic(&maps.join("regions.json"), &render_regions(paths, state))?;
     // Rebuild the links: drop stale ones, then point each installed file at the data directory.
     for entry in fs::read_dir(&data)
         .map_err(io_err("cannot read", &data))?
@@ -358,6 +365,12 @@ fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::Ins
         for f in &r.files {
             let link = data.join(&f.name);
             std::os::unix::fs::symlink(paths.maps_dir().join(&f.name), &link)
+                .map_err(io_err("cannot link", &link))?;
+        }
+        let places = super::map::places_name(&r.id);
+        if paths.maps_dir().join(&places).exists() {
+            let link = data.join(&places);
+            std::os::unix::fs::symlink(paths.maps_dir().join(&places), &link)
                 .map_err(io_err("cannot link", &link))?;
         }
     }
@@ -533,8 +546,17 @@ mod tests {
             file.contains("kit net enable") && !file.contains("href=\"/maps/\""),
             "{file}"
         );
-        let regions = render_regions(&st);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
+        let regions = render_regions(&paths, &st);
         assert!(regions.contains("/maps/data/map_x.pmtiles") && regions.contains("\"maxzoom\": 12"));
+        assert!(regions.contains("\"places\": null"), "{regions}");
+        // With a place index next to the map, the viewer is told where it is and it is linked.
+        fs::create_dir_all(paths.maps_dir()).unwrap();
+        fs::write(paths.maps_dir().join("map_x.places.json"), "[]").unwrap();
+        assert!(render_regions(&paths, &st).contains("/maps/data/map_x.places.json"));
+        write_maps(&paths, &st, dir.path()).unwrap();
+        assert!(dir.path().join("maps/data/map_x.places.json").exists());
     }
 
     #[test]
