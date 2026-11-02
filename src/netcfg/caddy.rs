@@ -154,7 +154,14 @@ fn portal_site(spec: &CaddySpec) -> String {
         key = quote(&spec.key),
     );
     // The same Kiwix endpoints as on the mirrored hosts: search across all books, content, skin.
-    for path in ["/content/*", "/search*", "/skin/*", "/suggest*", "/catalog/*"] {
+    for path in [
+        "/content/*",
+        "/search*",
+        "/random*",
+        "/skin/*",
+        "/suggest*",
+        "/catalog/*",
+    ] {
         out.push_str(&format!("\thandle {path} {{\n\t\t{proxy}\n\t}}\n"));
     }
     if let Some(port) = spec.ollama_port {
