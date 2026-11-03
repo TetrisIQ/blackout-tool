@@ -13,6 +13,7 @@ use crate::catalog::Catalog;
 use crate::catalog::http::{CachedHttp, Http, UreqHttp};
 use crate::catalog::manifest::Manifest;
 use crate::catalog::resolve::{LiveResolver, Resolved, Resolver};
+use crate::datadir;
 use crate::diskspace::{FreeSpace, Statvfs};
 use crate::download::{
     self, Options as DownloadOptions, Outcome as DownloadOutcome, Progress, RangeSource, RateLimiter, Target,
@@ -88,7 +89,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Local HTTPS for the real domains (CA, Caddy, hosts); every step is reversible
+    /// Show or change where kit keeps its data (e.g. an external disk)
+    DataDir(DataDirArgs),
+    /// Local HTTPS for kit.local and the services (CA, Caddy, hosts); every step is reversible
     Net(crate::cli_net::NetArgs),
 }
 
@@ -209,6 +212,36 @@ pub struct VerifyArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct DataDirArgs {
+    #[command(subcommand)]
+    pub action: Option<DataDirAction>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DataDirAction {
+    /// Where the data is, how much it takes, and how much is free there (the default)
+    Show {
+        #[arg(long, env = "KIT_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+    },
+    /// Use another place from now on, e.g. an external disk
+    Set {
+        /// New location: an empty or new directory, absolute, without spaces or special characters
+        path: PathBuf,
+        /// Move what is installed there too (stops the services for the time it takes)
+        #[arg(long = "move")]
+        move_data: bool,
+        /// Port of the content server (only used when the services are restarted after a move)
+        #[arg(long)]
+        port: Option<u16>,
+        #[arg(long, env = "KIT_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+    },
+    /// Go back to the default place ($XDG_DATA_HOME/kit); data is not moved
+    Reset,
+}
+
+#[derive(Debug, Args)]
 pub struct StatusArgs {
     #[arg(long, env = "KIT_DATA_DIR")]
     pub data_dir: Option<PathBuf>,
@@ -254,6 +287,8 @@ pub struct Env<'a> {
     pub needs_sudo: bool,
     pub home: PathBuf,
     pub hosts_path: PathBuf,
+    /// Where kit keeps its own settings (`~/.config/kit`).
+    pub config_dir: PathBuf,
 }
 
 /// What a successful command wants the process exit code to be.
@@ -307,6 +342,7 @@ pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<Outcome> {
             needs_sudo: !crate::netcfg::running_as_root(),
             home: PathBuf::from(std::env::var_os("HOME").unwrap_or_default()),
             hosts_path: PathBuf::from("/etc/hosts"),
+            config_dir: config_dir()?,
         },
     )
 }
@@ -326,6 +362,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::Uninstall(args) => return uninstall_cmd(args, env, out),
         Command::Verify(args) => return verify_cmd(args, env, out),
         Command::Status(args) => return status_cmd(args, env, out),
+        Command::DataDir(args) => return data_dir_cmd(args, env, out),
         Command::Net(args) => return crate::cli_net::net_cmd(args, &catalog, env, out),
     }
     Ok(Outcome::Ok)
@@ -365,11 +402,16 @@ fn unit_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config/systemd/user"))
 }
 
+pub(crate) fn config_dir() -> Result<PathBuf> {
+    xdg_dir("XDG_CONFIG_HOME", ".config")
+}
+
+/// The data directory: the explicit one, else the one saved by `kit data-dir set`, else the default.
 pub(crate) fn data_dir_of(explicit: &Option<PathBuf>) -> Result<PathBuf> {
-    match explicit {
-        Some(d) => Ok(d.clone()),
-        None => xdg_dir("XDG_DATA_HOME", ""),
-    }
+    Ok(datadir::resolve(explicit.as_deref(), &config_dir()?, || {
+        xdg_dir("XDG_DATA_HOME", "")
+    })?
+    .0)
 }
 
 pub(crate) fn unix_now() -> u64 {
@@ -1200,6 +1242,87 @@ fn verify_cmd(args: &VerifyArgs, env: &Env, out: &mut dyn Write) -> Result<Outco
     }
 }
 
+fn data_dir_cmd(args: &DataDirArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
+    let current_of = |explicit: &Option<PathBuf>| {
+        datadir::resolve(explicit.as_deref(), &env.config_dir, || {
+            xdg_dir("XDG_DATA_HOME", "")
+        })
+    };
+    match &args.action {
+        None | Some(DataDirAction::Show { data_dir: None }) => show_data_dir(current_of(&None)?, env, out)?,
+        Some(DataDirAction::Show { data_dir }) => show_data_dir(current_of(data_dir)?, env, out)?,
+        Some(DataDirAction::Reset) => {
+            datadir::clear(&env.config_dir)?;
+            let (dir, _) = current_of(&None)?;
+            writeln!(out, "Back to the default place: {}", dir.display())?;
+            writeln!(out, "Nothing was moved; the data stays where it is.")?;
+        }
+        Some(DataDirAction::Set {
+            path,
+            move_data,
+            port,
+            data_dir,
+        }) => {
+            let new =
+                std::path::absolute(path).with_context(|| format!("cannot resolve {}", path.display()))?;
+            let (old, source) = current_of(data_dir)?;
+            install::relocate::check_target(&old, &new)?;
+            if *move_data {
+                let paths = paths_for(env, old.clone())?;
+                let port = port
+                    .or_else(|| StateGuard::open(&paths).ok().and_then(|g| g.port))
+                    .unwrap_or(DEFAULT_PORT);
+                let ctx = make_ctx(env, &paths, port);
+                let moved = install::relocate::relocate(&ctx, &new, &env.config_dir, env.space, &mut |m| {
+                    let _ = writeln!(std::io::stderr(), "{m} ...");
+                })?;
+                writeln!(out, "Moved {} to {}", old.display(), new.display())?;
+                for n in &moved.notes {
+                    writeln!(out, "note: {n}")?;
+                }
+            } else {
+                std::fs::create_dir_all(&new).with_context(|| format!("cannot create {}", new.display()))?;
+                datadir::save(&env.config_dir, &new)?;
+                writeln!(out, "kit will keep its data in {} from now on.", new.display())?;
+                if old.exists() {
+                    writeln!(
+                        out,
+                        "Nothing was moved: what is installed stays in {} (add --move to move it).",
+                        old.display()
+                    )?;
+                }
+            }
+            if source == datadir::Source::Explicit {
+                writeln!(
+                    out,
+                    "note: --data-dir / KIT_DATA_DIR is set and wins over the saved place; unset it to use {}",
+                    new.display()
+                )?;
+            }
+        }
+    }
+    Ok(Outcome::Ok)
+}
+
+fn show_data_dir((dir, source): (PathBuf, datadir::Source), env: &Env, out: &mut dyn Write) -> Result<()> {
+    let how = match source {
+        datadir::Source::Explicit => "--data-dir / KIT_DATA_DIR",
+        datadir::Source::Saved => "saved by `kit data-dir set`",
+        datadir::Source::Default => "default",
+    };
+    writeln!(out, "Data directory: {} ({how})", dir.display())?;
+    if dir.exists() {
+        let used = install::relocate::tree_size(&dir).unwrap_or(0);
+        writeln!(out, "Used:           {}", format_bytes(used))?;
+    } else {
+        writeln!(out, "Used:           (does not exist yet)")?;
+    }
+    if let Ok(free) = env.space.available(&dir) {
+        writeln!(out, "Free there:     {}", format_bytes(free))?;
+    }
+    Ok(())
+}
+
 fn status_cmd(args: &StatusArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
     let paths = paths_for(env, data_dir_of(&args.data_dir)?)?;
     let guard = StateGuard::open(&paths)?;
@@ -1477,6 +1600,7 @@ mod tests {
                 needs_sudo: false,
                 home: host.units.clone(),
                 hosts_path: host.units.join("hosts"),
+                config_dir: host.units.join("config"),
             },
         );
         (r, String::from_utf8(out).unwrap())
@@ -1826,6 +1950,69 @@ mod tests {
 
         let (_, out) = exec_on(&host, cat.path(), &["status", "--data-dir", dd], &http(), 0);
         assert!(out.contains("Nothing is installed"), "{out}");
+    }
+
+    #[test]
+    fn data_dir_set_move_carries_the_installation_to_another_place() {
+        let cat = install_catalog();
+        let root = tempfile::tempdir().unwrap();
+        let (old, new) = (root.path().join("a"), root.path().join("disk/kit"));
+        let (old_s, new_s) = (old.to_str().unwrap(), new.to_str().unwrap());
+        let (mut host, _) = bytes_host();
+        host.probe = FakeHttp::default().with(
+            "http://127.0.0.1:6589/catalog/v2/entries?count=1",
+            "<feed><totalResults>1</totalResults></feed>",
+        );
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["install", "--select", "wiki", "--data-dir", old_s],
+            &http(),
+            u64::MAX,
+        );
+        assert_eq!(r.unwrap(), Outcome::Ok, "{out}");
+
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["data-dir", "show", "--data-dir", old_s],
+            &http(),
+            u64::MAX,
+        );
+        r.unwrap();
+        assert!(out.contains(old_s) && out.contains("Used:"), "{out}");
+
+        let (r, out) = exec_on(
+            &host,
+            cat.path(),
+            &["data-dir", "set", new_s, "--move", "--data-dir", old_s],
+            &http(),
+            u64::MAX,
+        );
+        assert_eq!(r.unwrap(), Outcome::Ok, "{out}");
+        assert!(out.contains("Moved"), "{out}");
+        assert!(!old.exists() && new.join("library/wiki_2026-10.zim").exists());
+        let unit = std::fs::read_to_string(host.units.join("kit-kiwix.service")).unwrap();
+        assert!(unit.contains(new_s) && !unit.contains(old_s), "{unit}");
+        assert_eq!(
+            datadir::load(&host.units.join("config")).unwrap().as_deref(),
+            Some(new.as_path()),
+            "the new place is remembered"
+        );
+
+        // Still one installation, now found at the new place.
+        let (r, out) = exec_on(&host, cat.path(), &["status", "--data-dir", new_s], &http(), 0);
+        r.unwrap();
+        assert!(out.contains("wiki") && out.contains("running"), "{out}");
+        // A target that holds something is refused, and nothing is touched.
+        let (r, _) = exec_on(
+            &host,
+            cat.path(),
+            &["data-dir", "set", new_s, "--move", "--data-dir", new_s],
+            &http(),
+            u64::MAX,
+        );
+        assert!(r.is_err());
     }
 
     #[test]

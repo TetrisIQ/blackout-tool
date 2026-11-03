@@ -9,6 +9,7 @@ pub mod media;
 pub mod model;
 pub mod portal;
 pub mod reconcile;
+pub mod relocate;
 pub mod runner;
 pub mod service;
 pub mod state;
