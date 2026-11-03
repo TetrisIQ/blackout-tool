@@ -6,6 +6,7 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - `make test` - unit and integration tests (no network, no host changes)
 - `make lint` - `cargo fmt --check` + `cargo clippy -D warnings`
 - `make build` - release binary at `target/release/kit`
+- `make build-gui` - also builds the native download manager `target/release/kit-gui` (feature `gui`; run it next to `kit`, from the repo root or with `KIT_CATALOG`)
 - `test/accept_5gb.sh` - manual Phase 2 acceptance (5 GB, kill -9, outages; needs 5+ GB free in `$TMPDIR`, which should not be a tmpfs)
 - `KIT_E2E_ZIM=/path/small.zim cargo test --test e2e_kiwix -- --ignored` - opt-in end-to-end test with real kiwix-tools (no systemd involved)
 - `test/accept_net.sh` - manual Phase 4 acceptance (needs caddy, nftables, sudo; changes hosts/nft/trust and undoes them)
@@ -33,4 +34,5 @@ Linux tool that downloads and installs offline knowledge and entertainment so a 
 - Installers: all host access goes through `install::Ctx` (command runner, unit dir, tool search path, HTTP probe). Tests build a `Ctx` from temp dirs and `FakeRunner`; never call `systemctl` or write to `~/.config` in tests. State is in `<data-dir>/state/installed.json`; library XML, unit and portal are derived from it by `install::reconcile`.
 - Network layer (`netcfg`): host access goes through `NetCtx` (an unprivileged and a root `CommandRunner`, hosts path, unit dir, home); tests use temp dirs and `FakeRunner`. Only the root runner may receive `cp /etc/hosts`, `nft`, `trust`. Don't spawn processes in library unit tests (inherited `flock`s); use `tests/`.
 - Flatpak games (`install::flatpak`): always `--user`; tests use `FakeRunner`. A manual check against the real Flathub must set `FLATPAK_USER_DIR` to a temp dir.
-- Keep placeholder modules (`services`, `ui`) empty until their phase.
+- Native download manager (`src/ui`, binary `kit-gui`, egui): `ui::model` (selection, diff, sizes) and `ui::backend` (catalog, installed state, `Runner`) are toolkit-free and tested; only `ui::app` / `ui::theme` need the `gui` feature. Installs and removals are child `kit` processes (pause = kill, the engine resumes from the `.part` state); progress is read from `downloads/<id>/`. Tests use a fake `kit` shell script (`tests/ui_runner.rs`), never a real install. `KIT_DATA_DIR` points the window at a scratch data dir; `KIT_GUI_SHOT=file.ppm` (+ `KIT_GUI_TAB=downloads|installed|updates|services|wizard`) saves a screenshot and quits.
+- Keep the placeholder module `services` empty until its phase.
