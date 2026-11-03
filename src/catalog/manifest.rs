@@ -238,10 +238,6 @@ pub struct Manifest {
     /// Hook ids run after installation; the set of valid hooks is defined in Phase 3.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub post_install: Vec<String>,
-    /// Host names the package replaces locally (Phase 4), e.g. `de.wikipedia.org`. Each gets a
-    /// hosts entry, a vhost and a place in the local CA's name constraints. Exact hosts only.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mirror_domains: Vec<String>,
     /// Portal group of a `flatpak` package (one of [`APP_GROUPS`]); required there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -349,19 +345,6 @@ impl Manifest {
         }
         if self.post_install.iter().any(|h| blank(h)) {
             errs.push("post_install must not contain empty hook ids".into());
-        }
-        let mut hosts = std::collections::HashSet::new();
-        for d in &self.mirror_domains {
-            if !is_valid_host(d) {
-                errs.push(format!(
-                    "mirror_domains entry {d:?} must be a lowercase host name like de.wikipedia.org"
-                ));
-            } else if !hosts.insert(d) {
-                errs.push(format!("mirror_domains lists {d:?} more than once"));
-            }
-        }
-        if !self.mirror_domains.is_empty() && self.kind != PackageType::Zim {
-            errs.push("mirror_domains is only valid for type zim".into());
         }
         match (&self.service, self.kind) {
             (Some(sv), PackageType::Container) => {

@@ -1,7 +1,7 @@
 //! The marked block in `/etc/hosts`. Only text between the two marker lines is ever touched,
 //! so everything else in the file (and its order) is preserved, and removal is exact.
 
-/// The mirrored names resolve to this loopback address (all of 127.0.0.0/8 is local), not to
+/// The kit names resolve to this loopback address (all of 127.0.0.0/8 is local), not to
 /// 127.0.0.1, so the 80/443 redirect cannot catch a development server on localhost.
 pub const MIRROR_ADDR: &str = "127.77.0.1";
 pub const BEGIN: &str = "# BEGIN kit (emergency-kit) - managed block, remove with: kit net disable";

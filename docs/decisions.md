@@ -228,6 +228,9 @@ Already decided by the project owner: nftables redirect 443 -> 8443 (P4-4), `/et
 - Opt-in e2e (`--ignored`, needs caddy + kiwix-tools): Caddy on a random port with the generated cert, curl with `--resolve` and `--cacert`, a fixture ZIM, checking rewrite, "not available offline" page and cert validity.
 - Manual acceptance on this machine (`test/accept_net.sh` checklist): `kit net enable`, unplug network, load Berlin in Firefox, follow 50 links via `kit net check`, then `kit net disable` and verify hosts, nft, NSS and trust store are clean.
 
+## P4-10. Amendment (2026-11-03): the real-domain mirror is gone
+`kit.local` replaced it, so `mirror_domains`, the per-book vhosts with `/wiki/<Title>` and `/w/index.php` rewrites, and the hosts entries for `*.wikipedia.org` and friends were removed. `kit net` now serves only `kit.local` and the service hosts (`<service>.kit.local`); real internet names are never touched. The CA's name constraint is the portal host plus all catalog service hosts. Existing setups: re-run `kit net enable` (the hosts block and Caddyfile are rewritten; the old CA stays valid as its constraint is a superset). Points 1 and 2 of "P4 decisions" below describe the removed mirror and are kept as history.
+
 ## P4-9. Open question
 Chromium is not installed on this machine, so only Firefox (and `~/.pki/nssdb`) can be verified for real; Chromium coverage rests on the shared NSS path.
 

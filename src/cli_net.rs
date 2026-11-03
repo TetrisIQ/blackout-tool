@@ -10,9 +10,10 @@ use crate::catalog::Catalog;
 use crate::cli::{Env, Outcome};
 use crate::install::DEFAULT_PORT;
 use crate::install::Paths;
+use crate::install::portal::PORTAL_HOST;
 use crate::install::state::StateGuard;
 use crate::netcfg::NetPaths;
-use crate::netcfg::caddy::{self, Mirror};
+use crate::netcfg::caddy;
 use crate::netcfg::check;
 use crate::netcfg::enable::{self, Desired, NetCtx, Options, Step};
 
@@ -24,7 +25,7 @@ pub struct NetArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum NetAction {
-    /// Serve the installed mirrors under their real domains over HTTPS (changes /etc/hosts, the
+    /// Serve kit.local and the installed services over HTTPS (changes /etc/hosts, the
     /// certificate stores and nftables; asks for root only for those steps)
     Enable {
         /// Show what would change and which steps need root, then stop
@@ -49,13 +50,13 @@ pub enum NetAction {
         #[arg(long, env = "KIT_DATA_DIR")]
         data_dir: Option<PathBuf>,
     },
-    /// Follow a random sample of links from a mirrored site through the local HTTPS front and
-    /// report everything that does not load or would reach outside this machine
+    /// Follow a random sample of links from kit.local through the local HTTPS front and report
+    /// everything that does not load or would reach outside this machine
     Check {
         /// Number of pages to load
         #[arg(long, default_value_t = 50)]
         samples: usize,
-        /// Start host (default: the first mirrored host)
+        /// Start host (default: kit.local)
         #[arg(long)]
         host: Option<String>,
         /// Seed of the random sample, to repeat a run
@@ -71,12 +72,11 @@ pub enum NetAction {
     },
 }
 
-/// Mirrors of the installed packages and the hosts the CA may ever cover.
+/// Services of the installed packages and the hosts the CA may ever cover.
 fn desired(catalog: &Catalog, paths: &Paths) -> Result<(Desired, u16)> {
     let guard = StateGuard::open(paths)?;
     let mut d = Desired::default();
     for m in catalog.packages() {
-        d.permitted.extend(m.mirror_domains.iter().cloned());
         d.permitted.extend(m.service.iter().map(|s| s.host.clone()));
     }
     d.permitted.sort();
@@ -90,19 +90,7 @@ fn desired(catalog: &Catalog, paths: &Paths) -> Result<(Desired, u16)> {
     if !guard.models().is_empty() {
         d.ollama_port = Some(crate::install::model::OLLAMA_PORT);
     }
-    for rec in guard.packages.values().filter(|r| r.service.is_none()) {
-        let Ok(manifest) = catalog.package(&rec.id) else {
-            continue;
-        };
-        let Some(file) = rec.files.first() else { continue };
-        let book = file.name.strip_suffix(".zim").unwrap_or(&file.name).to_string();
-        for host in &manifest.mirror_domains {
-            d.mirrors.push(Mirror {
-                host: host.clone(),
-                book: book.clone(),
-            });
-        }
-    }
+    d.has_packages = !guard.packages.is_empty();
     Ok((d, guard.port.unwrap_or(DEFAULT_PORT)))
 }
 
@@ -223,17 +211,8 @@ pub fn net_cmd(args: &NetArgs, catalog: &Catalog, env: &Env, out: &mut dyn Write
             };
             let start = match host {
                 Some(h) if state.hosts.contains(h) => h.clone(),
-                Some(h) => bail!(
-                    "{h} is not a mirrored host (mirrored: {})",
-                    state.hosts.join(", ")
-                ),
-                None => state
-                    .hosts
-                    .iter()
-                    .find(|h| !h.contains(".m."))
-                    .or(state.hosts.first())
-                    .cloned()
-                    .unwrap_or_default(),
+                Some(h) => bail!("{h} is not served locally (hosts: {})", state.hosts.join(", ")),
+                None => PORTAL_HOST.to_string(),
             };
             let ca_pem = std::fs::read(NetPaths::new(&ctx.data_dir).ca_dir().join("ca.pem"))?;
             let fetch = check::PinnedFetch::new(state.hosts.clone(), state.listen_port, &ca_pem)?;

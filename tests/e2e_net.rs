@@ -1,6 +1,6 @@
 //! End to end with real `kiwix-serve` and `caddy` (opt-in). Nothing on the host changes: no hosts
 //! file, no certificate store, no nftables, no systemd. Both servers run as child processes on
-//! random loopback ports, and the client resolves the mirrored name to Caddy itself.
+//! random loopback ports, and the client resolves kit.local to Caddy itself.
 //!
 //!   KIT_E2E_ZIM=/path/to/small.zim cargo test --test e2e_net -- --ignored --nocapture
 //!
@@ -14,10 +14,9 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use emergency_kit::netcfg::ca::Ca;
-use emergency_kit::netcfg::caddy::{CaddySpec, Mirror, render_caddyfile};
+use emergency_kit::netcfg::caddy::{CaddySpec, render_caddyfile};
 use emergency_kit::netcfg::check::{Fetch, PinnedFetch, check};
 
-const HOST: &str = "wiki.example.org";
 const NOW: u64 = 1_788_000_000;
 
 struct Proc(Child);
@@ -87,7 +86,7 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
 
     // CA, leaf and Caddyfile exactly as `kit net enable` makes them.
     let ca_dir = root.join("ca");
-    let hosts = vec![HOST.to_string(), "kit.local".to_string()];
+    let hosts = vec!["kit.local".to_string()];
     let portal = root.join("portal");
     fs::create_dir_all(&portal).unwrap();
     fs::write(
@@ -98,15 +97,11 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
     let ca = Ca::create(&ca_dir, &hosts, NOW).unwrap();
     ca.ensure_leaf(&hosts, NOW).unwrap();
     let listen_port = free_port();
-    let mirrors = [Mirror {
-        host: HOST.into(),
-        book: book.clone(),
-    }];
+    let kiwix_book = book.clone();
     let caddyfile = root.join("Caddyfile");
     fs::write(
         &caddyfile,
         render_caddyfile(&CaddySpec {
-            mirrors: &mirrors,
             services: &[],
             cert: ca.files.leaf_cert(),
             key: ca.files.leaf_key(),
@@ -140,34 +135,6 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
     let ca_pem = fs::read(ca.files.cert()).unwrap();
     let client = PinnedFetch::new(hosts.clone(), listen_port, &ca_pem).unwrap();
 
-    // The front page redirects to the book's main page, with a certificate the CA vouches for.
-    let home = client.get(&format!("https://{HOST}/")).unwrap();
-    assert_eq!(home.status, 200, "{}", home.final_url);
-    assert!(
-        home.final_url
-            .starts_with(&format!("https://{HOST}/content/{book}/")),
-        "{}",
-        home.final_url
-    );
-
-    // A Wikipedia-style article URL maps onto the same page.
-    let title = home.final_url.rsplit('/').next().unwrap();
-    let article = client.get(&format!("https://{HOST}/wiki/{title}")).unwrap();
-    assert_eq!(article.status, 200);
-    assert_eq!(article.body.len(), home.body.len());
-
-    // Search works under both the Wikipedia and the kiwix spelling.
-    let search = client
-        .get(&format!("https://{HOST}/w/index.php?search=a"))
-        .unwrap();
-    assert_eq!(search.status, 200, "{}", search.final_url);
-
-    // Pages that do not exist offline give a friendly answer, not a connection error.
-    let missing = client
-        .get(&format!("https://{HOST}/w/index.php?title=X&action=edit"))
-        .unwrap();
-    assert_eq!(missing.status, 404);
-
     // Other hosts cannot be reached at all.
     assert!(client.get("https://example.com/").is_err());
 
@@ -184,6 +151,16 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
     assert!(
         all.body.contains("/content/"),
         "search results link into the books"
+    );
+    // The book itself is served under the portal host, with the skin it needs.
+    let book_page = client
+        .get(&format!("https://kit.local/content/{kiwix_book}/"))
+        .unwrap();
+    assert!(
+        [200, 302].contains(&book_page.status),
+        "{} {}",
+        book_page.status,
+        book_page.final_url
     );
     // Plain http on the portal host only redirects to https.
     let mut plain = TcpStream::connect(("127.0.0.1", listen_port + 1)).unwrap();
@@ -202,7 +179,7 @@ fn real_caddy_serves_the_zim_under_its_domain_with_the_local_ca() {
     );
 
     // The link checker finds no leaks on the real book.
-    let report = check(&client, &hosts, HOST, 15, 7);
+    let report = check(&client, &hosts, "kit.local", 15, 7);
     println!("{report:?}");
     assert!(report.pages_checked > 1);
     let leaks: Vec<_> = report

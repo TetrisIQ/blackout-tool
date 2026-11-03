@@ -1727,7 +1727,7 @@ mod tests {
             &format!(
                 "id: wiki\nname: Test Wiki\ndescription: d\ncategory: c\ntype: zim\n\
                  source: {{url: 'http://127.0.0.1:1/wiki_2026-10.zim'}}\nsha256: {sha}\nsize_bytes: {}\n\
-                 license: {{spdx: CC-BY-SA-4.0}}\nmirror_domains: [wiki.example.org]\n",
+                 license: {{spdx: CC-BY-SA-4.0}}\n",
                 ZIM_BYTES.len()
             ),
         );
@@ -1984,7 +1984,7 @@ mod tests {
     }
 
     #[test]
-    fn net_needs_an_installed_mirror_and_the_tools_and_status_says_off() {
+    fn net_needs_an_installed_package_and_the_tools_and_status_says_off() {
         let cat = install_catalog();
         let data = tempfile::tempdir().unwrap();
         let dd = data.path().to_str().unwrap();
@@ -2001,7 +2001,7 @@ mod tests {
             0,
         );
         let e = r.unwrap_err().to_string();
-        assert!(e.contains("no installed package mirrors a domain"), "{e}");
+        assert!(e.contains("no package is installed"), "{e}");
 
         let (r, _) = exec_on(
             &host,

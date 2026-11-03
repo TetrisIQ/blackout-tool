@@ -1,5 +1,5 @@
 //! The per-machine local CA. It is created on this machine only, its key never leaves
-//! `<data-dir>/net/ca/` (mode 0600), and X.509 name constraints limit it to the mirrored hosts,
+//! `<data-dir>/net/ca/` (mode 0600), and X.509 name constraints limit it to the kit hosts (kit.local and the services),
 //! so a stolen key cannot impersonate any other site.
 
 use std::fs;
@@ -116,7 +116,7 @@ fn normalized(hosts: &[String]) -> Result<Vec<String>, NetError> {
     v.dedup();
     if v.is_empty() {
         return Err(NetError::Invalid(
-            "no mirrored domains: nothing to issue a certificate for".into(),
+            "no hosts: nothing to issue a certificate for".into(),
         ));
     }
     if let Some(bad) = v.iter().find(|h| !is_valid_host(h)) {

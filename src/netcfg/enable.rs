@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::ca::Ca;
-use super::caddy::{self, CaddySpec, Mirror};
+use super::caddy::{self, CaddySpec};
 use super::trust::{self, SystemStore};
 use super::{NetError, NetPaths, hosts, io_err, nft};
 use crate::install::Check;
@@ -61,20 +61,20 @@ impl NetCtx<'_> {
 /// What the installed packages ask for.
 #[derive(Debug, Clone, Default)]
 pub struct Desired {
-    pub mirrors: Vec<Mirror>,
+    /// Something is installed (a ZIM book or a service); the portal has nothing to show otherwise.
+    pub has_packages: bool,
     /// Installed container services.
     pub services: Vec<caddy::Service>,
     /// Port of the local Ollama server when a language model is installed.
     pub ollama_port: Option<u16>,
-    /// Every host any catalog package may mirror. Becomes the CA's name constraint, so installing
+    /// Every service host any catalog package may use. Becomes the CA's name constraint, so installing
     /// another package later does not force a new CA.
     pub permitted: Vec<String>,
 }
 
 impl Desired {
     pub fn hosts(&self) -> Vec<String> {
-        let mut h: Vec<String> = self.mirrors.iter().map(|m| m.host.clone()).collect();
-        h.extend(self.services.iter().map(|s| s.host.clone()));
+        let mut h: Vec<String> = self.services.iter().map(|s| s.host.clone()).collect();
         h.sort();
         h.dedup();
         h
@@ -232,12 +232,11 @@ fn caddy_hint() -> String {
 /// Brings the network layer in line with `desired`. With `dry_run` nothing is changed.
 pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Step>, NetError> {
     let mut hosts_list = desired.hosts();
-    let have_mirrors = !hosts_list.is_empty();
     hosts_list.push(PORTAL_HOST.to_string());
     hosts_list.sort();
-    if !have_mirrors {
+    if !desired.has_packages {
         return Err(NetError::Invalid(
-            "no installed package mirrors a domain or runs a service; install one first, e.g. `kit install --select wikipedia_de_nopic`".into(),
+            "no package is installed, so kit.local would be empty; install one first, e.g. `kit install --select wikipedia_de_nopic`".into(),
         ));
     }
     let caddy_bin = ctx.require("caddy", &format!("Install it with: {}", caddy_hint()))?;
@@ -296,7 +295,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     permitted.push(PORTAL_HOST.to_string());
     steps.go(
         &format!(
-            "{} the local CA in {} (name-constrained to {} mirrored hosts)",
+            "{} the local CA in {} (name-constrained to {} hosts)",
             if fresh_ca { "create" } else { "keep" },
             ca_dir.display(),
             permitted.iter().collect::<std::collections::BTreeSet<_>>().len()
@@ -310,7 +309,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
         },
     )?;
     steps.go(
-        "issue the server certificate for the mirrored hosts",
+        "issue the server certificate for kit.local and the services",
         None,
         || {
             if let Some(c) = &ca {
@@ -322,7 +321,6 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
 
     // 2. Caddy.
     let caddyfile = paths.dir.join("Caddyfile");
-    let mirrors = desired.mirrors.clone();
     let services = desired.services.clone();
     let mut caddy_changed = false;
     steps.go(
@@ -335,7 +333,6 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
         || {
             let files = super::ca::CaFiles::new(ca_dir.clone());
             let text = caddy::render_caddyfile(&CaddySpec {
-                mirrors: &mirrors,
                 services: &services,
                 cert: files.leaf_cert(),
                 key: files.leaf_key(),
@@ -448,7 +445,7 @@ pub fn enable(ctx: &NetCtx, desired: &Desired, opts: &Options) -> Result<Vec<Ste
     if new_hosts != hosts_text {
         steps.go(
             &format!(
-                "add the marked block to {} (127.77.0.1 for each mirrored host and {PORTAL_HOST})",
+                "add the marked block to {} (127.77.0.1 for {PORTAL_HOST} and each service host)",
                 ctx.hosts_path.display()
             ),
             Some("/etc/hosts belongs to root"),
@@ -749,25 +746,22 @@ mod tests {
         root: FakeRunner,
     }
 
-    fn mirror(h: &str, b: &str) -> Mirror {
-        Mirror {
-            host: h.into(),
-            book: b.into(),
-        }
+    fn service(h: &str, port: u16) -> caddy::Service {
+        caddy::Service { host: h.into(), port }
     }
 
     fn desired() -> Desired {
         Desired {
-            services: vec![],
-            ollama_port: None,
-            mirrors: vec![
-                mirror("de.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),
-                mirror("de.m.wikipedia.org", "wikipedia_de_all_nopic_2026-10"),
+            has_packages: true,
+            services: vec![
+                service("navidrome.kit.local", 4533),
+                service("jellyfin.kit.local", 8096),
             ],
+            ollama_port: None,
             permitted: vec![
-                "de.wikipedia.org".into(),
-                "de.m.wikipedia.org".into(),
-                "en.wikipedia.org".into(),
+                "navidrome.kit.local".into(),
+                "jellyfin.kit.local".into(),
+                "kavita.kit.local".into(),
             ],
         }
     }
@@ -885,24 +879,24 @@ mod tests {
         let net = e.data.join("net");
         assert!(net.join("ca/ca.pem").exists() && net.join("ca/leaf.pem").exists());
         let caddyfile = std::fs::read_to_string(net.join("Caddyfile")).unwrap();
-        assert!(caddyfile.contains("https://de.m.wikipedia.org:8443, https://de.wikipedia.org:8443"));
+        assert!(caddyfile.contains("https://navidrome.kit.local:8443 {"));
         assert!(
             std::fs::read_to_string(e.units.join(caddy::UNIT_NAME))
                 .unwrap()
                 .contains("caddy")
         );
         let hosts = std::fs::read_to_string(&e.hosts).unwrap();
-        assert!(hosts.starts_with(HOSTS) && hosts.contains("127.77.0.1 de.wikipedia.org"));
+        assert!(hosts.starts_with(HOSTS) && hosts.contains("127.77.0.1 navidrome.kit.local"));
         // The CA may issue for the whole catalog, the certificate only for what is installed.
         assert!(
             std::fs::read_to_string(net.join("ca/permitted.txt"))
                 .unwrap()
-                .contains("en.wikipedia.org")
+                .contains("kavita.kit.local")
         );
         assert!(
             !std::fs::read_to_string(net.join("ca/leaf-hosts.txt"))
                 .unwrap()
-                .contains("en.wikipedia.org")
+                .contains("kavita.kit.local")
         );
 
         let root_calls = e.root.calls();
@@ -1041,13 +1035,12 @@ mod tests {
         let e = env();
         enable(&e.ctx(), &desired(), &Options::default()).unwrap();
         let mut more = desired();
-        more.mirrors
-            .push(mirror("fr.wikipedia.org", "wikipedia_fr_all_nopic_2026-10"));
+        more.services.push(service("calibre.kit.local", 8083));
         let err = enable(&e.ctx(), &more, &Options::default())
             .unwrap_err()
             .to_string();
         assert!(
-            err.contains("--renew-ca") && err.contains("fr.wikipedia.org"),
+            err.contains("--renew-ca") && err.contains("calibre.kit.local"),
             "{err}"
         );
 
@@ -1068,7 +1061,7 @@ mod tests {
         assert!(
             std::fs::read_to_string(&e.hosts)
                 .unwrap()
-                .contains("fr.wikipedia.org")
+                .contains("calibre.kit.local")
         );
         assert!(
             e.root

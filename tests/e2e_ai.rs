@@ -140,7 +140,6 @@ fn the_front_serves_the_assistant_and_limits_the_ollama_api() {
     fs::write(
         &caddyfile,
         render_caddyfile(&CaddySpec {
-            mirrors: &[],
             services: &[],
             cert: ca.files.leaf_cert(),
             key: ca.files.leaf_key(),

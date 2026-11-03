@@ -301,3 +301,8 @@ Found by the first real install of the test profile: no login, no library.
 ### kit-gui: download speed
 
 - The window runs the same `kit install` as the CLI with the same defaults (4 connections); the slowness came from an unoptimised `kit` next to a debug `kit-gui`. Measured against the local fake server, 1 GB: release 1.1 s, debug 24 s. A debug `kit-gui` now uses `target/release/kit` when it exists and warns on stderr when it does not.
+
+## Real-domain mirror removed (2026-11-03)
+- `kit.local` is the way in, so the redirect of `de.wikipedia.org` & co. is gone: `mirror_domains` is no longer a manifest key (removed from all 10 ZIM manifests), Caddy has no per-book vhosts, `/etc/hosts` only gets `kit.local` and service hosts, the CA is constrained to those. `kit net check` starts at `kit.local`.
+- Existing machines: run `kit net enable` once; it rewrites the hosts block and Caddyfile (the old CA is a superset, no `--renew-ca`). `kit net enable` now needs any installed package instead of a mirror.
+- Tests: Caddyfile and enable tests use service hosts; `e2e_net` (real Caddy + kiwix-serve, run with an NHS ZIM) now checks the book under `kit.local/content/<book>/`.

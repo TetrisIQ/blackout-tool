@@ -1,5 +1,5 @@
-//! The offline link checker: starts at a mirrored host, follows a random sample of internal links
-//! and verifies that they load. The real fetcher resolves only mirrored hosts (to the local
+//! The offline link checker: starts at a served host (kit.local by default), follows a random sample of internal links
+//! and verifies that they load. The real fetcher resolves only the hosts kit serves (to the local
 //! Caddy) and trusts only the local CA, so a request that would leave the machine fails instead
 //! of silently succeeding over the real internet.
 
@@ -259,7 +259,7 @@ pub fn check(fetch: &dyn Fetch, hosts: &[String], start_host: &str, samples: usi
     report
 }
 
-/// Resolves mirrored hosts to the local Caddy and refuses every other name.
+/// Resolves the hosts kit serves to the local Caddy and refuses every other name.
 #[derive(Debug)]
 struct PinnedResolver {
     hosts: Vec<String>,
@@ -283,7 +283,7 @@ impl Resolver for PinnedResolver {
     }
 }
 
-/// HTTPS client that trusts only the local CA and reaches only the mirrored hosts.
+/// HTTPS client that trusts only the local CA and reaches only the hosts kit serves.
 pub struct PinnedFetch {
     agent: ureq::Agent,
 }
@@ -314,7 +314,7 @@ impl PinnedFetch {
 impl Fetch for PinnedFetch {
     fn get(&self, url: &str) -> Result<Response, String> {
         let mut resp = self.agent.get(url).call().map_err(|e| match e {
-            ureq::Error::HostNotFound => "would leave the machine (host is not mirrored)".to_string(),
+            ureq::Error::HostNotFound => "would leave the machine (host is not served by kit)".to_string(),
             e => e.to_string(),
         })?;
         let status = resp.status().as_u16();
@@ -353,7 +353,7 @@ mod tests {
                     final_url: url.to_string(),
                     body: body.clone(),
                 }),
-                None => Err("would leave the machine (host is not mirrored)".into()),
+                None => Err("would leave the machine (host is not served by kit)".into()),
             }
         }
     }
