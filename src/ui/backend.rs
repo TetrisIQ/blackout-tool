@@ -335,10 +335,39 @@ pub struct Job {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Done { id: String, name: String, update: bool },
-    Failed { id: String, message: String },
+    Done {
+        id: String,
+        name: String,
+        update: bool,
+    },
+    Failed {
+        id: String,
+        message: String,
+    },
     Removed(Vec<String>),
     RemoveFailed(String),
+    /// The data directory is now this one.
+    Relocated(PathBuf),
+    RelocateFailed(String),
+}
+
+/// What the user typed as the new place, made absolute (`~/` allowed) and checked with the same
+/// rules as `kit data-dir set`. The error is meant to be shown as it is.
+pub fn check_location(current: &Path, typed: &str) -> Result<PathBuf, String> {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return Err("Enter the folder where kit should keep its data.".into());
+    }
+    let path = match typed.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(rest),
+        None => PathBuf::from(typed),
+    };
+    if !path.is_absolute() {
+        return Err("Use a full path, starting with / (or ~/).".into());
+    }
+    crate::install::relocate::check_target(current, &path)
+        .map(|()| path)
+        .map_err(|e| e.to_string())
 }
 
 struct Proc {
@@ -393,6 +422,7 @@ pub struct Runner {
     pub jobs: Vec<Job>,
     running: Option<(String, Proc)>,
     removing: Option<(Vec<String>, Proc)>,
+    relocating: Option<(PathBuf, Proc)>,
     /// Failures to start a child, reported on the next poll.
     pending: Vec<Event>,
 }
@@ -404,12 +434,48 @@ impl Runner {
             jobs: Vec::new(),
             running: None,
             removing: None,
+            relocating: None,
             pending: Vec::new(),
         }
     }
 
     pub fn is_queued(&self, id: &str) -> bool {
         self.jobs.iter().any(|j| j.id == id)
+    }
+
+    pub fn is_relocating(&self) -> bool {
+        self.relocating.is_some()
+    }
+
+    /// What the running move says it is doing ("copying ... (this can take a while) ...").
+    pub fn relocate_status(&self) -> String {
+        self.relocating
+            .as_ref()
+            .map_or_else(String::new, |(_, p)| p.last_line())
+    }
+
+    /// A move needs the library quiet: no download, removal or earlier move running.
+    pub fn can_relocate(&self) -> bool {
+        self.running.is_none() && self.removing.is_none() && self.relocating.is_none()
+    }
+
+    /// Runs `kit data-dir set <new> [--move]`. With `move_data` the installed content follows.
+    pub fn relocate(&mut self, new: PathBuf, move_data: bool) {
+        if !self.can_relocate() {
+            return;
+        }
+        let mut cmd = self.cfg.command(true);
+        cmd.arg("data-dir").arg("set").arg(&new);
+        if move_data {
+            cmd.arg("--move");
+        }
+        cmd.arg("--data-dir").arg(&self.cfg.data_dir);
+        match Proc::spawn(cmd) {
+            Ok(p) => self.relocating = Some((new, p)),
+            Err(e) => self
+                .pending
+                .push(Event::RelocateFailed(format!("cannot start kit: {e}"))),
+        }
     }
 
     pub fn is_removing(&self) -> bool {
@@ -519,6 +585,20 @@ impl Runner {
             self.removing = None;
         }
 
+        if let Some((new, p)) = &mut self.relocating
+            && let Ok(Some(status)) = p.child.try_wait()
+        {
+            let new = std::mem::take(new);
+            events.push(if status.success() {
+                self.cfg.data_dir = new.clone();
+                Event::Relocated(new)
+            } else {
+                let m = p.last_line();
+                Event::RelocateFailed(m.strip_prefix("error: ").unwrap_or(&m).to_string())
+            });
+            self.relocating = None;
+        }
+
         if let Some((id, p)) = &mut self.running {
             let id = id.clone();
             if let Ok(Some(status)) = p.child.try_wait() {
@@ -559,6 +639,7 @@ impl Runner {
         }
 
         if self.running.is_none()
+            && self.relocating.is_none()
             && online
             && let Some(j) = self.jobs.iter_mut().find(|j| j.state == JobState::Queued)
         {

@@ -71,6 +71,7 @@ enum Act {
     Restart(String, String),
     Open(String),
     HealthCheck,
+    ChangeLocation,
 }
 
 pub struct App {
@@ -86,6 +87,8 @@ pub struct App {
     /// Package whose removal waits for a second click on the Installed page.
     confirm_remove: Option<String>,
     wiz: Option<Wiz>,
+    /// The storage-location dialog: typed path, move flag, last error.
+    loc: Option<Location>,
     done: Vec<(String, bool, Instant)>,
     failures: Vec<String>,
     online: bool,
@@ -101,8 +104,14 @@ pub struct App {
     snapshot: Option<Snapshot>,
 }
 
+struct Location {
+    text: String,
+    move_data: bool,
+    error: Option<String>,
+}
+
 /// Developer aid: `KIT_GUI_SHOT=file.ppm` saves the window after a few seconds and quits;
-/// `KIT_GUI_TAB=downloads|installed|updates|services` picks the page.
+/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location` picks the page.
 struct Snapshot {
     path: std::path::PathBuf,
     frames: u32,
@@ -124,6 +133,7 @@ impl App {
             lang_find: String::new(),
             confirm_remove: None,
             wiz: None,
+            loc: None,
             done: Vec::new(),
             failures: Vec::new(),
             online: true,
@@ -291,6 +301,17 @@ impl App {
                     self.failures.push(format!("{name}: {message}"));
                 }
                 Event::Removed(_) => self.refresh_installed(),
+                Event::Relocated(new) => {
+                    self.cfg.data_dir = new;
+                    self.loc = None;
+                    self.refresh_installed();
+                }
+                Event::RelocateFailed(m) => {
+                    if let Some(l) = &mut self.loc {
+                        l.error = Some(m);
+                    }
+                    self.refresh_installed();
+                }
                 Event::RemoveFailed(m) => {
                     self.refresh_installed();
                     self.failures.push(format!("Removing failed: {m}"));
@@ -319,6 +340,13 @@ impl App {
             Act::ToggleJob(id) => self.runner.toggle(&id),
             Act::CancelJob(id) => self.runner.cancel(&id),
             Act::Confirm(id) => self.confirm_remove = id,
+            Act::ChangeLocation => {
+                self.loc = Some(Location {
+                    text: String::new(),
+                    move_data: self.ws.as_ref().is_some_and(|w| !w.installed.is_empty()),
+                    error: None,
+                });
+            }
             Act::Remove(id) => {
                 self.confirm_remove = None;
                 if let Some(ws) = &mut self.ws {
@@ -415,6 +443,13 @@ impl App {
         let Some(s) = &mut self.snapshot else { return };
         s.frames += 1;
         let frames = s.frames;
+        if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("location") {
+            self.loc = Some(Location {
+                text: "/run/media/you/disk/kit".into(),
+                move_data: true,
+                error: Some("example error".into()),
+            });
+        }
         if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("wizard") {
             self.open_wizard();
         }
@@ -496,6 +531,9 @@ impl eframe::App for App {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.wiz = None;
             self.lang_open = false;
+            if !self.runner.is_relocating() {
+                self.loc = None;
+            }
         }
         let mut acts: Vec<Act> = Vec::new();
 
@@ -526,6 +564,7 @@ impl eframe::App for App {
                 }
             });
         self.wizard(&ctx);
+        self.location(&ctx);
         self.take_snapshot(&ctx);
         for a in acts {
             self.act(&ctx, a);
@@ -909,7 +948,31 @@ impl App {
                         let used = ws.drive_bytes.saturating_sub(ws.free_bytes);
                         ui.horizontal(|ui| {
                             ui.add_space(10.0);
-                            ui.label(theme::small(short_path(&self.cfg.data_dir), N700).size(11.0));
+                            let r = ui
+                                .add(
+                                    egui::Label::new(
+                                        theme::small(short_path(&self.cfg.data_dir), N700).size(11.0),
+                                    )
+                                    .sense(Sense::click()),
+                                )
+                                .on_hover_text(format!(
+                                    "{}\nClick to change the storage location",
+                                    self.cfg.data_dir.display()
+                                ))
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if r.clicked() {
+                                acts.push(Act::ChangeLocation);
+                            }
+                            if ui
+                                .add(
+                                    egui::Label::new(theme::small("Change", ACCENT).size(11.0))
+                                        .sense(Sense::click()),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
+                                acts.push(Act::ChangeLocation);
+                            }
                         });
                         ui.horizontal(|ui| {
                             ui.add_space(10.0);
@@ -1943,6 +2006,112 @@ impl App {
                     });
                 });
         });
+    }
+
+    /// Where kit keeps its data: type a folder (an external disk, say) and optionally move
+    /// what is installed. The work is `kit data-dir set`, so the window stays responsive.
+    fn location(&mut self, ctx: &egui::Context) {
+        let Some(loc) = &mut self.loc else {
+            return;
+        };
+        let busy = self.runner.is_relocating();
+        let can = self.runner.can_relocate();
+        let used = self
+            .ws
+            .as_ref()
+            .map_or(0, |w| w.drive_bytes.saturating_sub(w.free_bytes));
+        let current = self.cfg.data_dir.clone();
+        let (mut close, mut apply) = (false, false);
+        #[allow(deprecated)]
+        let modal = Modal::new(egui::Id::new("location"))
+            .backdrop_color(Color32::from_rgba_unmultiplied(0x2d, 0x2b, 0x2b, 82))
+            .frame(
+                Frame::new()
+                    .fill(BG)
+                    .stroke(Stroke::new(1.0, N500))
+                    .corner_radius(CornerRadius::same(12)),
+            );
+        modal.show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(theme::heading("Storage location", 16.0));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.label(theme::small(format!("Now: {}", current.display()), N700));
+                    ui.label(theme::small(
+                        "Choose an empty or new folder, e.g. on an external disk. \
+                         Paths with spaces or special characters do not work; \
+                         make a link with a plain name to the disk instead.",
+                        N700,
+                    ));
+                    ui.add_enabled(
+                        !busy,
+                        egui::TextEdit::singleline(&mut loc.text)
+                            .hint_text("/run/media/you/disk/kit")
+                            .desired_width(480.0),
+                    );
+                    ui.add_enabled(
+                        !busy,
+                        egui::Checkbox::new(
+                            &mut loc.move_data,
+                            format!("Move what is installed ({} used) to the new place", fmt_bytes(used)),
+                        ),
+                    );
+                    if loc.move_data {
+                        ui.label(theme::small(
+                            "The content server and services stop while the files move; \
+                             a copy to another disk can take a long time. Downloads must be paused.",
+                            N700,
+                        ));
+                    } else {
+                        ui.label(theme::small(
+                            "Nothing is moved: what is installed stays where it is, new downloads go to the new place.",
+                            N700,
+                        ));
+                    }
+                    if busy {
+                        let s = self.runner.relocate_status();
+                        ui.label(theme::small(if s.is_empty() { "Working\u{2026}".into() } else { s }, ACCENT));
+                    } else if !can {
+                        ui.label(theme::small("Pause or finish the running download first.", A700));
+                    }
+                    if let Some(e) = &loc.error {
+                        ui.label(theme::small(e.clone(), Color32::from_rgb(0xa8, 0x32, 0x2d)));
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    if button(ui, if loc.move_data { "Move" } else { "Use this place" }, BtnKind::Primary, can && !busy) {
+                        apply = true;
+                    }
+                    if button(ui, "Cancel", BtnKind::Ghost, !busy) {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+        });
+        if apply {
+            match backend::check_location(&current, &loc.text) {
+                Ok(path) => {
+                    loc.error = None;
+                    let move_data = loc.move_data;
+                    self.runner.relocate(path, move_data);
+                }
+                Err(e) => loc.error = Some(e),
+            }
+        }
+        if close {
+            self.loc = None;
+        }
     }
 
     fn wizard(&mut self, ctx: &egui::Context) {

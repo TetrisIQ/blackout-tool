@@ -217,3 +217,76 @@ fn cancel_stops_the_running_child_and_the_next_job_takes_over() {
     r.cancel("nope");
     assert_eq!(r.jobs.len(), 1);
 }
+
+#[test]
+fn a_move_runs_data_dir_set_and_later_installs_use_the_new_place() {
+    let _serial = serial();
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Runner::new(fake_kit(d.path(), "exit 0"));
+    let new = d.path().join("disk/kit");
+    assert!(r.can_relocate());
+    r.relocate(new.clone(), true);
+    assert!(r.is_relocating() && !r.can_relocate());
+    // A queued install waits for the move instead of racing it.
+    r.enqueue(&pkg("a"), false);
+    let events = poll_until(&mut r, true, |_, ev| {
+        ev.iter().any(|e| matches!(e, Event::Relocated(_)))
+    });
+    assert!(events.contains(&Event::Relocated(new.clone())));
+    poll_until(&mut r, true, |r, _| r.jobs.is_empty());
+    let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
+    let lines: Vec<&str> = calls.lines().collect();
+    assert!(
+        lines[0].contains(&format!("data-dir set {} --move --data-dir", new.display())),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[1].contains(&format!("install --select a --data-dir {}", new.display())),
+        "the install started after the move, in the new place: {}",
+        lines[1]
+    );
+}
+
+#[test]
+fn a_failed_move_reports_the_reason_and_keeps_the_old_place() {
+    let _serial = serial();
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Runner::new(fake_kit(
+        d.path(),
+        "case \"$*\" in *\"data-dir set\"*) echo 'error: /x: exists and is not empty' >&2; exit 1;; esac",
+    ));
+    r.relocate(d.path().join("elsewhere"), false);
+    let events = poll_until(&mut r, true, |_, ev| {
+        ev.iter().any(|e| matches!(e, Event::RelocateFailed(_)))
+    });
+    assert!(events.contains(&Event::RelocateFailed("/x: exists and is not empty".into())));
+    r.enqueue(&pkg("a"), false);
+    poll_until(&mut r, true, |r, _| r.jobs.is_empty());
+    let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
+    assert!(
+        calls
+            .lines()
+            .last()
+            .unwrap()
+            .contains(&format!("--data-dir {}", d.path().join("data").display()))
+    );
+    assert!(
+        !calls.lines().next().unwrap().contains("--move"),
+        "no --move unless asked"
+    );
+}
+
+#[test]
+fn typed_locations_are_checked_like_kit_data_dir_set() {
+    use emergency_kit::ui::backend::check_location;
+    let cur = Path::new("/home/u/.local/share/kit");
+    assert!(check_location(cur, "  ").is_err());
+    assert!(check_location(cur, "disk/kit").unwrap_err().contains("full path"));
+    assert!(check_location(cur, "/run/media/u/My Disk/kit").is_err());
+    assert!(check_location(cur, "/home/u/.local/share/kit/sub").is_err());
+    assert_eq!(
+        check_location(cur, " /run/media/u/disk/kit ").unwrap(),
+        Path::new("/run/media/u/disk/kit")
+    );
+}
