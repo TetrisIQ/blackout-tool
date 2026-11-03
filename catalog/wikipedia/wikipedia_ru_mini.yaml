@@ -1,0 +1,12 @@
+id: wikipedia_ru_mini
+name: "Wikipedia (Russian, intros only)"
+description: "Introductions of every article of the Russian Wikipedia, with the info box and a few pictures."
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_ru_all, flavour: mini, lang: rus}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [ru]

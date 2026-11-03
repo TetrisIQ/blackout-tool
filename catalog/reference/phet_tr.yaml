@@ -1,0 +1,12 @@
+id: phet_tr
+name: PhET simulations (Türkçe)
+description: "Interactive physics, chemistry, biology and maths simulations in Türkçe."
+category: reference
+type: zim
+source:
+  kiwix: {name: phet_tr_all, lang: tur}
+license:
+  spdx: CC-BY-4.0
+  url: https://creativecommons.org/licenses/by/4.0/
+  attribution: "PhET Interactive Simulations, University of Colorado Boulder"
+languages: [tr]

@@ -1,0 +1,12 @@
+id: wikivoyage_zh_nopic
+name: "Wikivoyage (Chinese, no pictures)"
+description: Chinese travel guides.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikivoyage_zh_all, flavour: nopic, lang: zho}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikivoyage contributors
+languages: [zh]

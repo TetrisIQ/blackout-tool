@@ -1,0 +1,12 @@
+id: phet_es
+name: PhET simulations (Español)
+description: "Interactive physics, chemistry, biology and maths simulations in Español."
+category: reference
+type: zim
+source:
+  kiwix: {name: phet_es_all, lang: spa}
+license:
+  spdx: CC-BY-4.0
+  url: https://creativecommons.org/licenses/by/4.0/
+  attribution: "PhET Interactive Simulations, University of Colorado Boulder"
+languages: [es]

@@ -1,0 +1,12 @@
+id: wikiversity_es_nopic
+name: "Wikiversity (Español, no pictures)"
+description: Free Español learning materials and courses.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikiversity_es_all, flavour: nopic, lang: spa}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikiversity contributors
+languages: [es]

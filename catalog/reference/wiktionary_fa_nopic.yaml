@@ -1,0 +1,12 @@
+id: wiktionary_fa_nopic
+name: Wiktionary (Persian)
+description: "Free Persian dictionary with definitions, etymologies and translations."
+category: reference
+type: zim
+source:
+  kiwix: {name: wiktionary_fa_all, flavour: nopic, lang: fas}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wiktionary contributors
+languages: [fa]

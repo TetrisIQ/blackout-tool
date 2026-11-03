@@ -1,0 +1,12 @@
+id: wikipedia_fr_mini
+name: "Wikipedia (Français, intros only)"
+description: "Introductions of every article of the Français Wikipedia, with the info box and a few pictures."
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_fr_all, flavour: mini, lang: fra}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [fr]

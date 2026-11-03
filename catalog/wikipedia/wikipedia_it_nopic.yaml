@@ -1,0 +1,12 @@
+id: wikipedia_it_nopic
+name: "Wikipedia (Italiano, no pictures)"
+description: Full text of the Italiano Wikipedia without images.
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_it_all, flavour: nopic, lang: ita}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [it]

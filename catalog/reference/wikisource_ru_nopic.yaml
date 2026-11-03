@@ -1,0 +1,12 @@
+id: wikisource_ru_nopic
+name: "Wikisource (Russian, no pictures)"
+description: Library of Russian source texts.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikisource_ru_all, flavour: nopic, lang: rus}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikisource contributors
+languages: [ru]

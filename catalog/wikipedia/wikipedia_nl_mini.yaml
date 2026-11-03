@@ -1,0 +1,12 @@
+id: wikipedia_nl_mini
+name: "Wikipedia (Nederlands, intros only)"
+description: "Introductions of every article of the Nederlands Wikipedia, with the info box and a few pictures."
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_nl_all, flavour: mini, lang: nld}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [nl]

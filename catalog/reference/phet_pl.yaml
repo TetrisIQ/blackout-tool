@@ -1,0 +1,12 @@
+id: phet_pl
+name: PhET simulations (Polski)
+description: "Interactive physics, chemistry, biology and maths simulations in Polski."
+category: reference
+type: zim
+source:
+  kiwix: {name: phet_pl_all, lang: pol}
+license:
+  spdx: CC-BY-4.0
+  url: https://creativecommons.org/licenses/by/4.0/
+  attribution: "PhET Interactive Simulations, University of Colorado Boulder"
+languages: [pl]

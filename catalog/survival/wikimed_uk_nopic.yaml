@@ -1,0 +1,12 @@
+id: wikimed_uk_nopic
+name: "WikiMed (Ukrainian, medical encyclopedia, no pictures)"
+description: "Wikipedia's medical articles in Ukrainian: conditions, treatments, first aid."
+category: survival
+type: zim
+source:
+  kiwix: {name: wikipedia_uk_medicine, flavour: nopic, lang: ukr}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [uk]

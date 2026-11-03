@@ -1,0 +1,12 @@
+id: wikibooks_nl_nopic
+name: Wikibooks (Nederlands)
+description: Free Nederlands textbooks and manuals.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikibooks_nl_all, flavour: nopic, lang: nld}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikibooks contributors
+languages: [nl]

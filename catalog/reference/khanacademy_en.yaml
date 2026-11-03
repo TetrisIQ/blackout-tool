@@ -1,0 +1,12 @@
+id: khanacademy_en
+name: "Khan Academy (English - US curriculum, with videos)"
+description: Khan Academy courses with exercises and videos (English - US curriculum). Very large; snapshot of 2023.
+category: reference
+type: zim
+source:
+  kiwix: {name: khanacademy_en_all, lang: eng}
+license:
+  spdx: CC-BY-NC-SA-4.0
+  url: https://creativecommons.org/licenses/by-nc-sa/4.0/
+  attribution: Khan Academy
+languages: [en]

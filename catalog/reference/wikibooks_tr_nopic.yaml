@@ -1,0 +1,12 @@
+id: wikibooks_tr_nopic
+name: Wikibooks (Türkçe)
+description: Free Türkçe textbooks and manuals.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikibooks_tr_all, flavour: nopic, lang: tur}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikibooks contributors
+languages: [tr]

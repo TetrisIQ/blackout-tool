@@ -1,0 +1,12 @@
+id: wikipedia_hi_mini
+name: "Wikipedia (Hindi, intros only)"
+description: "Introductions of every article of the Hindi Wikipedia, with the info box and a few pictures."
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_hi_all, flavour: mini, lang: hin}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [hi]

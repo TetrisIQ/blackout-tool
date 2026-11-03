@@ -1,0 +1,12 @@
+id: wikibooks_uk_nopic
+name: Wikibooks (Ukrainian)
+description: Free Ukrainian textbooks and manuals.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikibooks_uk_all, flavour: nopic, lang: ukr}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikibooks contributors
+languages: [uk]

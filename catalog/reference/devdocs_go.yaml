@@ -1,0 +1,12 @@
+id: devdocs_go
+name: Go documentation (DevDocs)
+description: Go language and standard library reference.
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_go, lang: eng}
+license:
+  spdx: BSD-3-Clause
+  url: https://go.dev/LICENSE
+  attribution: "The Go Authors, via DevDocs"
+languages: [en]

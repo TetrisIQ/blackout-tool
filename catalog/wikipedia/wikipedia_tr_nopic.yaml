@@ -1,0 +1,12 @@
+id: wikipedia_tr_nopic
+name: "Wikipedia (Türkçe, no pictures)"
+description: Full text of the Türkçe Wikipedia without images.
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_tr_all, flavour: nopic, lang: tur}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [tr]

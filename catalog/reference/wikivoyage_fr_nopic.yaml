@@ -1,0 +1,12 @@
+id: wikivoyage_fr_nopic
+name: "Wikivoyage (Français, no pictures)"
+description: Français travel guides.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikivoyage_fr_all, flavour: nopic, lang: fra}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikivoyage contributors
+languages: [fr]

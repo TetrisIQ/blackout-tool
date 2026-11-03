@@ -1,0 +1,12 @@
+id: ifixit_ko
+name: iFixit repair guides (Korean)
+description: "Repair guides for phones, computers, appliances, bikes and cars in Korean."
+category: reference
+type: zim
+source:
+  kiwix: {name: ifixit_ko_all, lang: kor}
+license:
+  spdx: CC-BY-NC-SA-3.0
+  url: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  attribution: iFixit and its contributors
+languages: [ko]

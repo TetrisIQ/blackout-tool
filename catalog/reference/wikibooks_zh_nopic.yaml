@@ -1,0 +1,12 @@
+id: wikibooks_zh_nopic
+name: Wikibooks (Chinese)
+description: Free Chinese textbooks and manuals.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikibooks_zh_all, flavour: nopic, lang: zho}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikibooks contributors
+languages: [zh]

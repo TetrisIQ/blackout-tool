@@ -1,0 +1,12 @@
+id: phet_it
+name: PhET simulations (Italiano)
+description: "Interactive physics, chemistry, biology and maths simulations in Italiano."
+category: reference
+type: zim
+source:
+  kiwix: {name: phet_it_all, lang: ita}
+license:
+  spdx: CC-BY-4.0
+  url: https://creativecommons.org/licenses/by/4.0/
+  attribution: "PhET Interactive Simulations, University of Colorado Boulder"
+languages: [it]

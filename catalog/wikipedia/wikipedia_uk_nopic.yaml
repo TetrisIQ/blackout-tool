@@ -1,0 +1,12 @@
+id: wikipedia_uk_nopic
+name: "Wikipedia (Ukrainian, no pictures)"
+description: Full text of the Ukrainian Wikipedia without images.
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_uk_all, flavour: nopic, lang: ukr}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [uk]

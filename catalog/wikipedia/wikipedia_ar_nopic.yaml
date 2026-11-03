@@ -1,0 +1,12 @@
+id: wikipedia_ar_nopic
+name: "Wikipedia (Arabic, no pictures)"
+description: Full text of the Arabic Wikipedia without images.
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_ar_all, flavour: nopic, lang: ara}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [ar]

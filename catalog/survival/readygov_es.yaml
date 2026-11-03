@@ -1,0 +1,12 @@
+id: readygov_es
+name: Ready.gov (Spanish)
+description: "Emergency preparedness by hazard in Spanish: power outages, floods, fires, shelter, supplies."
+category: survival
+type: zim
+source:
+  kiwix: {name: ready.gov_es_all, lang: spa}
+license:
+  spdx: LicenseRef-Public-Domain-US
+  url: https://www.fema.gov/about/openfema/terms-conditions
+  attribution: FEMA / U.S. Department of Homeland Security
+languages: [es]

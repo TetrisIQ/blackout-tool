@@ -1,0 +1,12 @@
+id: devdocs_docker
+name: Docker documentation (DevDocs)
+description: Docker and Dockerfile reference.
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_docker, lang: eng}
+license:
+  spdx: Apache-2.0
+  url: https://www.apache.org/licenses/LICENSE-2.0
+  attribution: "Docker, Inc., via DevDocs"
+languages: [en]

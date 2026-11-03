@@ -1,0 +1,12 @@
+id: ifixit_de
+name: iFixit repair guides (Deutsch)
+description: "Repair guides for phones, computers, appliances, bikes and cars in German."
+category: reference
+type: zim
+source:
+  kiwix: {name: ifixit_de_all, lang: deu}
+license:
+  spdx: CC-BY-NC-SA-3.0
+  url: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  attribution: iFixit and its contributors
+languages: [de]

@@ -1,0 +1,12 @@
+id: wikisource_pl_nopic
+name: "Wikisource (Polski, no pictures)"
+description: Library of Polski source texts.
+category: reference
+type: zim
+source:
+  kiwix: {name: wikisource_pl_all, flavour: nopic, lang: pol}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikisource contributors
+languages: [pl]

@@ -1,0 +1,12 @@
+id: devdocs_postgresql
+name: PostgreSQL documentation (DevDocs)
+description: PostgreSQL manual.
+category: reference
+type: zim
+source:
+  kiwix: {name: devdocs_en_postgresql, lang: eng}
+license:
+  spdx: PostgreSQL
+  url: https://www.postgresql.org/about/licence/
+  attribution: "PostgreSQL Global Development Group, via DevDocs"
+languages: [en]

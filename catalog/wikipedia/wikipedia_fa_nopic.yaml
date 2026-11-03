@@ -1,0 +1,12 @@
+id: wikipedia_fa_nopic
+name: "Wikipedia (Persian, no pictures)"
+description: Full text of the Persian Wikipedia without images.
+category: wikipedia
+type: zim
+source:
+  kiwix: {name: wikipedia_fa_all, flavour: nopic, lang: fas}
+license:
+  spdx: CC-BY-SA-4.0
+  url: https://creativecommons.org/licenses/by-sa/4.0/
+  attribution: Wikipedia contributors
+languages: [fa]
