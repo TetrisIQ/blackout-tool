@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use emergency_kit::catalog::PackageType;
-use emergency_kit::ui::backend::{Config, Event, JobState, Runner};
+use emergency_kit::ui::backend::{ArchiveRequest, Config, Event, JobState, Runner};
 use emergency_kit::ui::model::Pkg;
 
 /// Writing a script and running it while another test forks fails with ETXTBSY; run one at a time.
@@ -289,4 +289,100 @@ fn typed_locations_are_checked_like_kit_data_dir_set() {
         check_location(cur, " /run/media/u/disk/kit ").unwrap(),
         Path::new("/run/media/u/disk/kit")
     );
+}
+
+fn request() -> ArchiveRequest {
+    ArchiveRequest {
+        url: " https://projekt-gutenberg.org/bibliothek/ ".into(),
+        id: "gutenberg-de".into(),
+        name: "Projekt Gutenberg-DE".into(),
+        license: "personal copy".into(),
+        page_limit: "50".into(),
+    }
+}
+
+#[test]
+fn an_archive_request_is_checked_like_the_cli_and_suggests_an_id() {
+    assert!(request().check().is_ok());
+    for bad in [
+        ArchiveRequest {
+            license: " ".into(),
+            ..request()
+        },
+        ArchiveRequest {
+            id: "Bad Id".into(),
+            ..request()
+        },
+        ArchiveRequest {
+            url: "ftp://x".into(),
+            ..request()
+        },
+        ArchiveRequest {
+            page_limit: "abc".into(),
+            ..request()
+        },
+        ArchiveRequest {
+            page_limit: "0".into(),
+            ..request()
+        },
+    ] {
+        assert!(bad.check().is_err(), "{bad:?}");
+    }
+    assert!(
+        ArchiveRequest {
+            page_limit: String::new(),
+            ..request()
+        }
+        .check()
+        .is_ok()
+    );
+    assert_eq!(
+        ArchiveRequest::suggested_id("https://www.Projekt-Gutenberg.org/bibliothek/"),
+        "projekt-gutenberg-org"
+    );
+    assert_eq!(ArchiveRequest::suggested_id(""), "");
+}
+
+#[test]
+fn an_archive_job_runs_kit_archive_shows_its_output_and_leaves_the_queue_when_done() {
+    let _serial = serial();
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Runner::new(fake_kit(d.path(), "echo 'crawled 3 of 50 pages'; sleep 1"));
+    r.enqueue_archive(&request());
+    assert!(r.jobs[0].archive && r.jobs[0].bytes == 0);
+    // Seen while running: the crawler's last line.
+    let end = Instant::now() + Duration::from_secs(10);
+    let mut seen = String::new();
+    while Instant::now() < end && !seen.contains("crawled 3") {
+        r.poll(true);
+        seen = r.status_of("gutenberg-de");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(seen, "crawled 3 of 50 pages");
+    let events = poll_until(&mut r, true, |r, _| r.jobs.is_empty());
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Done { id, .. } if id == "gutenberg-de"))
+    );
+    let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
+    assert!(
+        calls.contains(
+            "archive https://projekt-gutenberg.org/bibliothek/ --id gutenberg-de --name Projekt Gutenberg-DE \
+             --license personal copy --page-limit 50 --data-dir"
+        ),
+        "{calls}"
+    );
+}
+
+#[test]
+fn a_failed_crawl_stays_in_the_queue_with_the_reason() {
+    let _serial = serial();
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Runner::new(fake_kit(d.path(), "echo 'error: the crawl failed' >&2; exit 1"));
+    r.enqueue_archive(&request());
+    poll_until(&mut r, true, |_, ev| {
+        ev.iter().any(|e| matches!(e, Event::Failed { .. }))
+    });
+    assert_eq!(r.jobs[0].state, JobState::Failed("the crawl failed".into()));
 }

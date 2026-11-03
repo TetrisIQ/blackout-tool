@@ -247,6 +247,7 @@ mod tests {
             flatpak: None,
             group: None,
             map: None,
+            collection: None,
             ollama: Some(OllamaRef {
                 model: "granite4.2".into(),
                 tag: "3b".into(),

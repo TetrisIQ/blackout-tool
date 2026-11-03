@@ -78,6 +78,8 @@ pub enum Command {
     Download(DownloadArgs),
     /// Download if needed, then install: library, content server, landing page
     Install(InstallArgs),
+    /// Crawl a website into a local ZIM (an offline copy, like the Wayback Machine) and install it
+    Archive(ArchiveArgs),
     /// Remove installed packages (the downloaded files are kept unless --purge)
     Uninstall(UninstallArgs),
     /// Check installed packages and the content server
@@ -182,6 +184,53 @@ pub struct InstallArgs {
 
     #[command(flatten)]
     pub tuning: Tuning,
+}
+
+#[derive(Debug, Args)]
+pub struct ArchiveArgs {
+    /// Start page; only pages below this address are crawled (e.g. https://example.org/library/)
+    pub url: String,
+
+    /// Package id, `[a-z0-9][a-z0-9_-]*`; remove it later with `kit uninstall <id>`
+    #[arg(long)]
+    pub id: String,
+
+    /// Title shown in the library (default: the id)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    #[arg(long, default_value = "Offline copy of a website")]
+    pub description: String,
+
+    /// License of the content (SPDX id, or e.g. "personal copy"); required
+    #[arg(long)]
+    pub license: String,
+
+    /// Parallel browser tabs
+    #[arg(long, default_value_t = 2)]
+    pub workers: u32,
+
+    /// Stop after this many pages (try 50 first to check the result)
+    #[arg(long)]
+    pub page_limit: Option<u32>,
+
+    /// Skip URLs matching this regex; repeatable
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Page-load condition for the crawler: `load` for JavaScript-heavy sites
+    #[arg(long, default_value = "domcontentloaded")]
+    pub wait_until: String,
+
+    /// zimit container image
+    #[arg(long, default_value = crate::archive::DEFAULT_IMAGE)]
+    pub image: String,
+
+    #[arg(long, env = "KIT_DATA_DIR")]
+    pub data_dir: Option<PathBuf>,
+
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
+    pub port: Option<u16>,
 }
 
 #[derive(Debug, Args)]
@@ -359,6 +408,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::Plan(args) => return plan_cmd(&catalog, args, http, space, env, out),
         Command::Download(args) => return download_cmd(&catalog, args, env, out),
         Command::Install(args) => return install_cmd(&catalog, args, env, out),
+        Command::Archive(args) => return archive_cmd(args, env, out),
         Command::Uninstall(args) => return uninstall_cmd(args, env, out),
         Command::Verify(args) => return verify_cmd(args, env, out),
         Command::Status(args) => return status_cmd(args, env, out),
@@ -986,6 +1036,16 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
     if item.kind == crate::catalog::PackageType::Model {
         return r.model.is_some();
     }
+    if item.kind == crate::catalog::PackageType::Collection {
+        // The record is written once every book is there. New books of the site are not
+        // fetched by a plain re-run; that is an update (Phase 10).
+        return !r.files.is_empty()
+            && catalog
+                .package(&item.id)
+                .ok()
+                .and_then(|m| m.content.as_ref())
+                .is_some_and(|c| paths.media_dir(&c.media).join(&item.id).exists());
+    }
     if item.kind == crate::catalog::PackageType::Map {
         // The region comes from whichever build was newest at install time; it is kept until
         // the user reinstalls (updates are Phase 10). A map without its place index is not
@@ -1025,6 +1085,7 @@ fn install_input(
         flatpak: manifest.source.flatpak.clone(),
         group: manifest.group.clone(),
         map: manifest.source.map.clone(),
+        collection: manifest.source.collection,
         ollama: manifest.source.ollama.clone(),
         model_spec: manifest.model.clone(),
         category: Some(manifest.category.clone()),
@@ -1046,6 +1107,7 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
     if kinds.contains(&T::Map) {
         tools::require("pmtiles", &ctx.search_path)?;
     }
+    // Collections need no program: kit fetches the books itself.
     if kinds.contains(&T::Container) {
         for t in ["podman", "systemctl"] {
             tools::require(t, &ctx.search_path)?;
@@ -1167,6 +1229,48 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
             paths.portal_dir().join("index.html").display()
         )?;
     }
+    Ok(Outcome::Ok)
+}
+
+fn archive_cmd(args: &ArchiveArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
+    let spec = crate::archive::ArchiveSpec {
+        url: args.url.clone(),
+        id: args.id.clone(),
+        name: args.name.clone().unwrap_or_else(|| args.id.clone()),
+        description: args.description.clone(),
+        license: args.license.clone(),
+        image: args.image.clone(),
+        workers: args.workers,
+        page_limit: args.page_limit,
+        exclude: args.exclude.clone(),
+        wait_until: args.wait_until.clone(),
+    };
+    spec.validate()?;
+    let paths = paths_for(env, data_dir_of(&args.data_dir)?)?;
+    let mut guard = StateGuard::open(&paths)?;
+    if guard
+        .packages
+        .get(&spec.id)
+        .is_some_and(|r| r.kind != crate::catalog::PackageType::Zim)
+    {
+        bail!("{} is already installed and is not a website archive", spec.id);
+    }
+    let ctx = make_ctx(env, &paths, args.port.or(guard.port).unwrap_or(DEFAULT_PORT));
+    install::reconcile::ensure_tools(&ctx)?;
+    writeln!(
+        out,
+        "crawling {} (this can take hours; re-run to refresh) ...",
+        spec.url
+    )?;
+    out.flush()?;
+    for n in crate::archive::archive(&spec, &ctx, &mut guard)? {
+        writeln!(out, "note: {n}")?;
+    }
+    writeln!(
+        out,
+        "archived {} as {}; remove with `kit uninstall {}`",
+        spec.url, spec.id, spec.id
+    )?;
     Ok(Outcome::Ok)
 }
 

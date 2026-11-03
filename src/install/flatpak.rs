@@ -288,6 +288,7 @@ mod tests {
             flatpak: Some(APP.into()),
             group: Some("sandbox".into()),
             map: None,
+            collection: None,
             ollama: None,
             model_spec: None,
             category: None,

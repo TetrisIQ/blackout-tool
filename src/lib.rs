@@ -2,6 +2,7 @@
 //! entertainment. See `ROADMAP.md` and `docs/decisions.md`.
 
 pub mod ai;
+pub mod archive;
 pub mod catalog;
 pub mod cli;
 pub mod cli_net;

@@ -2,12 +2,15 @@
 //! plus a disk cache that lets `kit plan` keep working offline.
 
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
+
+/// Upper bound for one file fetched with [`Http::get_file`].
+pub const MAX_FILE: u64 = 500_000_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
@@ -43,6 +46,15 @@ pub trait Http {
         Err(HttpError::Request {
             url: url.to_string(),
             message: "authenticated GET is not supported by this client".into(),
+        })
+    }
+
+    /// Streams a (binary) body into `dest` and returns its size and SHA-256. At most
+    /// [`MAX_FILE`] bytes; only clients that can download files implement it.
+    fn get_file(&self, url: &str, _dest: &Path) -> Result<(u64, String), HttpError> {
+        Err(HttpError::Request {
+            url: url.to_string(),
+            message: "file downloads are not supported by this client".into(),
         })
     }
 
@@ -84,6 +96,43 @@ impl UreqHttp {
 }
 
 impl Http for UreqHttp {
+    fn get_file(&self, url: &str, dest: &Path) -> Result<(u64, String), HttpError> {
+        let fail = |message: String| HttpError::Request {
+            url: url.to_string(),
+            message,
+        };
+        let mut resp = self
+            .agent
+            .get(url)
+            .config()
+            .timeout_global(Some(Duration::from_secs(300)))
+            .build()
+            .call()
+            .map_err(|e| fail(e.to_string()))?;
+        let mut reader = resp.body_mut().as_reader();
+        let mut out =
+            fs::File::create(dest).map_err(|e| fail(format!("cannot write {}: {e}", dest.display())))?;
+        let (mut hasher, mut total) = (Sha256::new(), 0u64);
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .map_err(|e| fail(format!("connection lost: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+            if total > MAX_FILE {
+                return Err(fail(format!("larger than {MAX_FILE} bytes, refusing")));
+            }
+            hasher.update(&buf[..n]);
+            out.write_all(&buf[..n])
+                .map_err(|e| fail(format!("cannot write {}: {e}", dest.display())))?;
+        }
+        let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        Ok((total, hex))
+    }
+
     fn get(&self, url: &str) -> Result<String, HttpError> {
         let fail = |e: ureq::Error| HttpError::Request {
             url: url.to_string(),

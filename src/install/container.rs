@@ -804,6 +804,7 @@ mod tests {
                 flatpak: None,
                 group: None,
                 map: None,
+                collection: None,
                 ollama: None,
                 model_spec: None,
                 category: None,

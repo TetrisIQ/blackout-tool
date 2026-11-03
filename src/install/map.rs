@@ -346,6 +346,7 @@ mod tests {
                 bbox: [5.86, 47.27, 15.04, 55.06],
                 maxzoom: 12,
             }),
+            collection: None,
             ollama: None,
             model_spec: None,
             category: None,

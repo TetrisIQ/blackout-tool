@@ -11,7 +11,7 @@ use eframe::egui::{
     ScrollArea, Sense, Stroke, StrokeKind, Ui, vec2,
 };
 
-use super::backend::{self, Config, Event, JobState, Loaded, Runner, ServiceInfo};
+use super::backend::{self, ArchiveRequest, Config, Event, JobState, Loaded, Runner, ServiceInfo};
 use super::model::{self, Status, Workspace, fmt_bytes, language_name};
 use super::theme::{
     self, A100, A700, A800, ACCENT, BG, DIVIDER, N100, N200, N500, N600, N700, N800, SURFACE, TEXT,
@@ -72,6 +72,7 @@ enum Act {
     Open(String),
     HealthCheck,
     ChangeLocation,
+    ArchiveWebsite,
 }
 
 pub struct App {
@@ -89,6 +90,8 @@ pub struct App {
     wiz: Option<Wiz>,
     /// The storage-location dialog: typed path, move flag, last error.
     loc: Option<Location>,
+    /// The "Archive a website" dialog: the request being typed and the last error.
+    archive: Option<ArchiveDialog>,
     done: Vec<(String, bool, Instant)>,
     failures: Vec<String>,
     online: bool,
@@ -104,6 +107,13 @@ pub struct App {
     snapshot: Option<Snapshot>,
 }
 
+struct ArchiveDialog {
+    req: ArchiveRequest,
+    error: Option<String>,
+    /// The user typed the id, so it no longer follows the address.
+    id_touched: bool,
+}
+
 struct Location {
     text: String,
     move_data: bool,
@@ -111,7 +121,7 @@ struct Location {
 }
 
 /// Developer aid: `KIT_GUI_SHOT=file.ppm` saves the window after a few seconds and quits;
-/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location` picks the page.
+/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location|archive` picks the page.
 struct Snapshot {
     path: std::path::PathBuf,
     frames: u32,
@@ -134,6 +144,7 @@ impl App {
             confirm_remove: None,
             wiz: None,
             loc: None,
+            archive: None,
             done: Vec::new(),
             failures: Vec::new(),
             online: true,
@@ -297,7 +308,15 @@ impl App {
                         .ws
                         .as_ref()
                         .and_then(|w| w.pkg(&id))
-                        .map_or(id, |p| p.name.clone());
+                        .map(|p| p.name.clone())
+                        .or_else(|| {
+                            self.runner
+                                .jobs
+                                .iter()
+                                .find(|j| j.id == id)
+                                .map(|j| j.name.clone())
+                        })
+                        .unwrap_or(id);
                     self.failures.push(format!("{name}: {message}"));
                 }
                 Event::Removed(_) => self.refresh_installed(),
@@ -345,6 +364,16 @@ impl App {
                     text: String::new(),
                     move_data: self.ws.as_ref().is_some_and(|w| !w.installed.is_empty()),
                     error: None,
+                });
+            }
+            Act::ArchiveWebsite => {
+                self.archive = Some(ArchiveDialog {
+                    req: ArchiveRequest {
+                        license: "personal copy".into(),
+                        ..Default::default()
+                    },
+                    error: None,
+                    id_touched: false,
                 });
             }
             Act::Remove(id) => {
@@ -448,6 +477,19 @@ impl App {
                 text: "/run/media/you/disk/kit".into(),
                 move_data: true,
                 error: Some("example error".into()),
+            });
+        }
+        if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("archive") {
+            self.archive = Some(ArchiveDialog {
+                req: ArchiveRequest {
+                    url: "https://projekt-gutenberg.org/bibliothek/".into(),
+                    id: "gutenberg-de".into(),
+                    name: "Projekt Gutenberg-DE".into(),
+                    license: "personal copy".into(),
+                    page_limit: "50".into(),
+                },
+                error: Some("example error".into()),
+                id_touched: true,
             });
         }
         if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("wizard") {
@@ -565,6 +607,7 @@ impl eframe::App for App {
             });
         self.wizard(&ctx);
         self.location(&ctx);
+        self.archive_dialog(&ctx);
         self.take_snapshot(&ctx);
         for a in acts {
             self.act(&ctx, a);
@@ -923,6 +966,24 @@ impl App {
                 );
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     acts.push(Act::Open("https://kit.local".into()));
+                }
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, 4.0, N200);
+                }
+                ui.painter().text(
+                    rect.left_center() + vec2(10.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    "Archive a website\u{2026}",
+                    FontId::proportional(13.0),
+                    TEXT,
+                );
+                if resp
+                    .on_hover_text("Crawl a site that has no ZIM file and add it to the library")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    acts.push(Act::ArchiveWebsite);
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -1609,7 +1670,18 @@ impl App {
                         for (i, j) in jobs.iter().enumerate() {
                             let (r, _) = row(ui, 58.0, i == 0, false);
                             let frac = if j.bytes == 0 { 0.0 } else { (j.got as f64 / j.bytes as f64).clamp(0.0, 1.0) as f32 };
-                            let line = match &j.state {
+                            let line = if j.archive {
+                                match &j.state {
+                                    JobState::Failed(m) => format!("Stopped: {m}"),
+                                    JobState::Paused => "Website copy \u{b7} Paused (starts over when resumed)".to_string(),
+                                    JobState::Queued => "Website copy \u{b7} Queued".to_string(),
+                                    _ if !self.online => "Website copy \u{b7} Waiting for connection".to_string(),
+                                    JobState::Running => {
+                                        let s = self.runner.status_of(&j.id);
+                                        if s.is_empty() { "Crawling the site\u{2026}".to_string() } else { s }
+                                    }
+                                }
+                            } else { match &j.state {
                                 JobState::Failed(m) => format!("Stopped: {m}"),
                                 JobState::Paused => format!("{} of {} \u{b7} Paused", fmt_bytes(j.got), fmt_size(j.bytes)),
                                 _ if !self.online => format!("{} of {} \u{b7} Waiting for connection", fmt_bytes(j.got), fmt_size(j.bytes)),
@@ -1619,7 +1691,7 @@ impl App {
                                     format!("{} of {}{rate}{}", fmt_bytes(j.got), fmt_size(j.bytes), if left.is_empty() { String::new() } else { format!(" \u{b7} {left} left") })
                                 }
                                 JobState::Queued => format!("{} of {} \u{b7} Queued", fmt_bytes(j.got), fmt_size(j.bytes)),
-                            };
+                            } };
                             let btn = Rect::from_center_size(Pos2::new(r.right() - 14.0 - 15.0, r.center().y), vec2(30.0, 30.0));
                             let cancel = btn.translate(vec2(-34.0, 0.0));
                             let text_right = cancel.left() - 14.0;
@@ -2010,6 +2082,127 @@ impl App {
 
     /// Where kit keeps its data: type a folder (an external disk, say) and optionally move
     /// what is installed. The work is `kit data-dir set`, so the window stays responsive.
+    fn archive_dialog(&mut self, ctx: &egui::Context) {
+        let Some(ArchiveDialog {
+            req,
+            error,
+            id_touched,
+        }) = &mut self.archive
+        else {
+            return;
+        };
+        let (mut close, mut start) = (false, false);
+        #[allow(deprecated)]
+        let modal = Modal::new(egui::Id::new("archive"))
+            .backdrop_color(Color32::from_rgba_unmultiplied(0x2d, 0x2b, 0x2b, 82))
+            .frame(
+                Frame::new()
+                    .fill(BG)
+                    .stroke(Stroke::new(1.0, N500))
+                    .corner_radius(CornerRadius::same(12)),
+            );
+        modal.show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(theme::heading("Archive a website", 16.0));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.label(theme::small(
+                        "Crawls the site and adds it to the library as a ZIM, for sites that have no \
+                         public ZIM file. Only pages below the address you enter are fetched. \
+                         Needs Podman and a connection; big sites take hours. Try a page limit of 50 first.",
+                        N700,
+                    ));
+                    ui.label(theme::small("Address", N800));
+                    let url = ui.add(
+                        egui::TextEdit::singleline(&mut req.url)
+                            .hint_text("https://projekt-gutenberg.org/bibliothek/")
+                            .desired_width(480.0),
+                    );
+                    if url.changed() && !*id_touched {
+                        req.id = ArchiveRequest::suggested_id(&req.url);
+                    }
+                    ui.label(theme::small("Title in the library", N800));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut req.name)
+                            .hint_text("Projekt Gutenberg-DE")
+                            .desired_width(480.0),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(theme::small("Id (a-z, 0-9, - and _)", N800));
+                            if ui
+                                .add(egui::TextEdit::singleline(&mut req.id).desired_width(230.0))
+                                .changed()
+                            {
+                                *id_touched = true;
+                            }
+                        });
+                        ui.vertical(|ui| {
+                            ui.label(theme::small("Page limit (empty: none)", N800));
+                            ui.add(egui::TextEdit::singleline(&mut req.page_limit).desired_width(230.0));
+                        });
+                    });
+                    ui.label(theme::small("License of the content", N800));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut req.license)
+                            .hint_text("CC-BY-4.0, or: personal copy")
+                            .desired_width(480.0),
+                    );
+                    ui.label(theme::small(
+                        "Check the site's terms first. A \"personal copy\" is for you only; do not share the file.",
+                        N700,
+                    ));
+                    if let Some(e) = error.as_ref() {
+                        ui.label(theme::small(e.clone(), Color32::from_rgb(0xa8, 0x32, 0x2d)));
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    if button(ui, "Start", BtnKind::Primary, true) {
+                        start = true;
+                    }
+                    if button(ui, "Cancel", BtnKind::Ghost, true) {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+        });
+        if start {
+            let taken = self.runner.is_queued(req.id.trim())
+                || self
+                    .ws
+                    .as_ref()
+                    .is_some_and(|w| w.installed.contains_key(req.id.trim()));
+            match req.check() {
+                _ if taken => {
+                    *error = Some(format!(
+                        "`{}` is already in the library or the queue; choose another id or remove it first.",
+                        req.id.trim()
+                    ));
+                }
+                Err(e) => *error = Some(e),
+                Ok(()) => {
+                    self.runner.enqueue_archive(req);
+                    self.tab = Tab::Downloads;
+                    close = true;
+                }
+            }
+        }
+        if close {
+            self.archive = None;
+        }
+    }
+
     fn location(&mut self, ctx: &egui::Context) {
         let Some(loc) = &mut self.loc else {
             return;

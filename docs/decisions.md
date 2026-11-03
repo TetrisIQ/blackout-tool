@@ -299,3 +299,18 @@ Zips are unpacked into a temporary directory and renamed into place (no half-unp
 
 ## P6-6. Audiobookshelf provisioning scans explicitly
 Audiobookshelf has no environment-based first login; kit calls `/init`, `/login`, `POST /api/libraries` and then `POST /api/libraries/<id>/scan`. Found on the real image 2.37.2: without the scan the library stays empty, because books unpacked before the library exists are not seen by the folder watcher. Later packs are picked up by the watcher.
+
+---
+
+# Collections: the whole Standard Ebooks catalog (CONFIRMED by the project owner, 2026-11-03)
+
+## C1. New package type `collection`, trust on first download
+`catalog/books/standardebooks_all.yaml` (`type: collection`, `source.collection.provider: standardebooks`, `content: {media: books, extract: none}`, an estimated `size_bytes`). Standard Ebooks publishes no checksums; its bulk zips and OPDS feeds are for Patrons Circle members (a login, which kit does not automate). kit therefore lists the books from the public sitemap (a book is a page that has a `/text` page below it), fetches each EPUB from its public per-book download URL, and records the SHA-256 of every file at the first download for `kit verify --deep`.
+
+**Deviation from rule 7 (verify checksums before installing):** there is nothing to verify against beforehand. What is checked instead: HTTPS, the file must be a real EPUB (a zip whose `mimetype` entry is `application/epub+zip`; a login page or error page is refused), and later changes are detected. A tampered file at the very first download would not be noticed. The deviation is limited to this package type; manifests with `source.url` still need `sha256`.
+
+## C2. Being a good guest
+One request every 500 ms, three tries per book with growing pauses, and the run stops when three books in a row fail (blocked or offline). The user agent is `emergency-kit/<version>`. The site's `robots.txt` bans some AI-assistant agents from the download paths and its pages warn about a 24 h IP ban for bots; kit is a user-run tool that sends one polite request at a time, but a user who is a Patron should prefer the official bulk zips.
+
+## C3. Resumable, recorded at the end
+Each book is written as `<file>.epub.part`, checked, and renamed into `<data-dir>/media/books/<id>/`; an interrupted run keeps the finished books and the next run fetches only the missing ones (leftover `.part` files and non-EPUBs are removed first). The package is recorded in `installed.json` (one `FileRecord` per book) only when all books are there, so `kit status` shows it as installed only then. A plain re-run does not pick up books that were added to the site later (that is an update, Phase 10).

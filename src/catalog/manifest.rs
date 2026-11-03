@@ -12,6 +12,9 @@ pub enum PackageType {
     Flatpak,
     /// A region cut out of a Protomaps planet build with `pmtiles extract` (Phase 7: maps).
     Map,
+    /// Many small files fetched one by one from a public site (ebooks); kit records each
+    /// file's checksum when it is first downloaded.
+    Collection,
     Apt,
     Model,
 }
@@ -24,6 +27,7 @@ impl PackageType {
             Self::Container => "container",
             Self::Flatpak => "flatpak",
             Self::Map => "map",
+            Self::Collection => "collection",
             Self::Apt => "apt",
             Self::Model => "model",
         }
@@ -113,6 +117,20 @@ impl MapRef {
     }
 }
 
+/// Sites whose whole catalog `collection` packages can fetch (the file layout is in code).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    /// Every EPUB of standardebooks.org, listed from its public sitemap.
+    StandardEbooks,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectionRef {
+    pub provider: Provider,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
@@ -138,6 +156,9 @@ pub struct Source {
     /// Region of a `map` package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<MapRef>,
+    /// Site to fetch book by book (type `collection`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<CollectionRef>,
     /// Distribution packages (type `apt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub packages: Vec<String>,
@@ -400,8 +421,11 @@ impl Manifest {
             (None, _) => {}
         }
         if let Some(c) = &self.content {
-            if self.kind != PackageType::Files {
-                errs.push("content is only valid for type files".into());
+            if !matches!(self.kind, PackageType::Files | PackageType::Collection) {
+                errs.push("content is only valid for type files or collection".into());
+            }
+            if self.kind == PackageType::Collection && c.extract != Extract::None {
+                errs.push("type collection takes content.extract: none".into());
             }
             if !MEDIA_KINDS.contains(&c.media.as_str()) {
                 errs.push(format!("content.media must be one of {}", MEDIA_KINDS.join(", ")));
@@ -510,6 +534,14 @@ impl Manifest {
                     Some(m) => errs.extend(m.problems()),
                     None => errs.push("type map needs source.map (bbox and maxzoom)".into()),
                 },
+                PackageType::Collection => {
+                    if s.collection.is_none() {
+                        errs.push("type collection needs source.collection (provider)".into());
+                    }
+                    if self.content.is_none() {
+                        errs.push("type collection needs a content block (media, extract: none)".into());
+                    }
+                }
                 PackageType::Apt => {
                     if s.packages.is_empty() || s.packages.iter().any(|p| blank(p)) {
                         errs.push("type apt needs a non-empty source.packages list".into());
@@ -529,6 +561,13 @@ impl Manifest {
                     "type flatpak takes no url or sha256 (Flathub signs and verifies the commits)".into(),
                 );
             }
+            if self.kind == PackageType::Collection && (s.url.is_some() || self.sha256.is_some()) {
+                errs.push(
+                    "type collection takes no url or sha256 (the site publishes no checksums; \
+                     kit records one per file on the first download)"
+                        .into(),
+                );
+            }
             if self.kind == PackageType::Map && (s.url.is_some() || self.sha256.is_some()) {
                 errs.push(
                     "type map takes no url or sha256 (the region is cut from the newest Protomaps build; \
@@ -538,7 +577,11 @@ impl Manifest {
             }
             if matches!(
                 self.kind,
-                PackageType::Container | PackageType::Flatpak | PackageType::Map | PackageType::Apt
+                PackageType::Container
+                    | PackageType::Flatpak
+                    | PackageType::Map
+                    | PackageType::Collection
+                    | PackageType::Apt
             ) && self.size_bytes.is_none()
             {
                 errs.push(format!(
@@ -550,6 +593,9 @@ impl Manifest {
 
         if s.ollama.is_some() && self.kind != PackageType::Model {
             errs.push("source.ollama is only valid for type model".into());
+        }
+        if s.collection.is_some() && self.kind != PackageType::Collection {
+            errs.push("source.collection is only valid for type collection".into());
         }
         if s.map.is_some() && self.kind != PackageType::Map {
             errs.push("source.map is only valid for type map".into());
@@ -873,6 +919,42 @@ size_bytes: 1000
 license: {{spdx: ODbL-1.0}}
 {extra}"
         )
+    }
+
+    #[test]
+    fn collection_manifest_rules() {
+        let yaml = |extra: &str| {
+            format!(
+                "id: books_all\nname: Books\ndescription: d\ncategory: books\ntype: collection\n\
+                 license: {{spdx: CC0-1.0}}\n{extra}"
+            )
+        };
+        let good = "source: {collection: {provider: standardebooks}}\nsize_bytes: 1000\n\
+                    content: {media: books, extract: none}\n";
+        let ok = parse(&yaml(good)).unwrap();
+        assert!(ok.validate().is_empty(), "{:?}", ok.validate());
+
+        let errs = |m: &Manifest| m.validate().join("; ");
+        let bare = parse(&yaml("source: {}\nsize_bytes: 1000\n")).unwrap();
+        let e = errs(&bare);
+        assert!(
+            e.contains("source.collection") && e.contains("content block"),
+            "{e}"
+        );
+
+        let zip = parse(&yaml(&good.replace("extract: none", "extract: zip"))).unwrap();
+        assert!(errs(&zip).contains("extract: none"));
+
+        let no_size = parse(&yaml(&good.replace("size_bytes: 1000\n", ""))).unwrap();
+        assert!(errs(&no_size).contains("estimated size_bytes"));
+
+        let with_sha = parse(&yaml(&format!("{good}sha256: {SHA}\n"))).unwrap();
+        assert!(errs(&with_sha).contains("takes no url or sha256"));
+
+        assert!(parse(&yaml(&good.replace("standardebooks", "elsewhere"))).is_err());
+        let mut misplaced = parse(KIWIX).unwrap();
+        misplaced.source.collection = ok.source.collection;
+        assert!(errs(&misplaced).contains("only valid for type collection"));
     }
 
     #[test]

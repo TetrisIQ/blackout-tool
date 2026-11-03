@@ -2,6 +2,7 @@
 //! library XML and served by a systemd user service. All state lives in
 //! `<data-dir>/state/installed.json`; everything else is reconciled from it.
 
+pub mod collection;
 pub mod container;
 pub mod flatpak;
 pub mod map;
@@ -178,6 +179,8 @@ pub struct InstallInput {
     /// `flatpak` packages: the Flathub application id and the portal group.
     pub flatpak: Option<String>,
     pub group: Option<String>,
+    /// `collection` packages: the site to fetch book by book.
+    pub collection: Option<crate::catalog::manifest::CollectionRef>,
     /// `map` packages: the region to cut out.
     pub map: Option<crate::catalog::manifest::MapRef>,
     /// `model` packages: the Ollama model and the size the registry reported.
@@ -224,6 +227,7 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Files => Ok(Box::new(media::MediaInstaller)),
         PackageType::Flatpak => Ok(Box::new(flatpak::FlatpakInstaller)),
         PackageType::Map => Ok(Box::new(map::MapInstaller)),
+        PackageType::Collection => Ok(Box::new(collection::CollectionInstaller)),
         PackageType::Model => Ok(Box::new(model::ModelInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",

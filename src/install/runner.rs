@@ -31,6 +31,12 @@ impl CmdOutput {
 
 pub trait CommandRunner {
     fn run(&self, program: &str, args: &[&str]) -> io::Result<CmdOutput>;
+
+    /// Long-running command whose output the user should watch (a crawl). Returns whether it
+    /// succeeded. The default captures the output like `run`.
+    fn run_visible(&self, program: &str, args: &[&str]) -> io::Result<bool> {
+        Ok(self.run(program, args)?.success)
+    }
 }
 
 pub struct RealRunner;
@@ -43,6 +49,10 @@ impl CommandRunner for RealRunner {
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         })
+    }
+
+    fn run_visible(&self, program: &str, args: &[&str]) -> io::Result<bool> {
+        Ok(Command::new(program).args(args).status()?.success())
     }
 }
 

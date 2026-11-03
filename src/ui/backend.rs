@@ -328,6 +328,10 @@ pub struct Job {
     pub update: bool,
     /// Bytes per second, smoothed.
     pub speed: f64,
+    /// A website crawl (`kit archive`) instead of a catalog install: no known size, no resume.
+    pub archive: bool,
+    /// `kit archive` arguments for a crawl job.
+    archive_args: Vec<String>,
     file: Option<String>,
     sha256: Option<String>,
     last: Option<(Instant, u64)>,
@@ -349,6 +353,86 @@ pub enum Event {
     /// The data directory is now this one.
     Relocated(PathBuf),
     RelocateFailed(String),
+}
+
+/// A website to turn into a ZIM (`kit archive`), as typed in the window.
+#[derive(Debug, Clone, Default)]
+pub struct ArchiveRequest {
+    pub url: String,
+    pub id: String,
+    pub name: String,
+    pub license: String,
+    /// Empty means no limit.
+    pub page_limit: String,
+}
+
+impl ArchiveRequest {
+    /// The id used when the user left it empty: the host name, lower case, `-` for the rest.
+    pub fn suggested_id(url: &str) -> String {
+        let host = url
+            .trim()
+            .split("://")
+            .last()
+            .unwrap_or("")
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("");
+        let host = host.strip_prefix("www.").unwrap_or(host);
+        host.to_ascii_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string()
+    }
+
+    fn limit(&self) -> Result<Option<u32>, String> {
+        let t = self.page_limit.trim();
+        if t.is_empty() {
+            return Ok(None);
+        }
+        t.parse::<u32>()
+            .ok()
+            .filter(|n| *n > 0)
+            .map(Some)
+            .ok_or_else(|| "The page limit must be a whole number above 0, or empty.".to_string())
+    }
+
+    /// The same rules as `kit archive`, with messages meant to be shown as they are.
+    pub fn check(&self) -> Result<(), String> {
+        self.limit()?;
+        crate::archive::ArchiveSpec {
+            url: self.url.trim().into(),
+            id: self.id.trim().into(),
+            name: self.name.trim().into(),
+            description: String::new(),
+            license: self.license.clone(),
+            image: crate::archive::DEFAULT_IMAGE.into(),
+            workers: 1,
+            page_limit: None,
+            exclude: Vec::new(),
+            wait_until: String::new(),
+        }
+        .validate()
+        .map_err(|e| e.to_string())
+    }
+
+    fn args(&self) -> Vec<String> {
+        let mut a = vec![
+            "archive".into(),
+            self.url.trim().into(),
+            "--id".into(),
+            self.id.trim().into(),
+            "--name".into(),
+            self.name.trim().into(),
+            "--license".into(),
+            self.license.trim().into(),
+        ];
+        if let Ok(Some(n)) = self.limit() {
+            a.extend(["--page-limit".into(), n.to_string()]);
+        }
+        a
+    }
 }
 
 /// What the user typed as the new place, made absolute (`~/` allowed) and checked with the same
@@ -379,11 +463,19 @@ impl Proc {
     fn spawn(mut cmd: Command) -> std::io::Result<Self> {
         let mut child = cmd
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
         let err = Arc::new(Mutex::new(String::new()));
-        if let Some(mut pipe) = child.stderr.take() {
+        // A crawl reports on stdout (the container's log), everything else on stderr.
+        let pipes: Vec<Box<dyn Read + Send>> = [
+            child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
+            child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        for mut pipe in pipes {
             let sink = Arc::clone(&err);
             std::thread::spawn(move || {
                 // Progress lines end in \r, so the last line is whatever follows the last break.
@@ -494,10 +586,48 @@ impl Runner {
             state: JobState::Queued,
             update,
             speed: 0.0,
+            archive: false,
+            archive_args: Vec::new(),
             file: p.file.clone(),
             sha256: p.sha256.clone(),
             last: None,
         });
+    }
+
+    /// Queues a website crawl. It runs like a download (one at a time) but has no size and
+    /// starts from the beginning after a pause.
+    pub fn enqueue_archive(&mut self, req: &ArchiveRequest) {
+        let id = req.id.trim().to_string();
+        if self.is_queued(&id) {
+            return;
+        }
+        let name = if req.name.trim().is_empty() {
+            id.clone()
+        } else {
+            req.name.trim().to_string()
+        };
+        self.jobs.push(Job {
+            id,
+            name,
+            bytes: 0,
+            got: 0,
+            state: JobState::Queued,
+            update: false,
+            speed: 0.0,
+            archive: true,
+            archive_args: req.args(),
+            file: None,
+            sha256: None,
+            last: None,
+        });
+    }
+
+    /// The last line the running job printed (for a crawl: what it is fetching).
+    pub fn status_of(&self, id: &str) -> String {
+        self.running
+            .as_ref()
+            .filter(|(r, _)| r == id)
+            .map_or_else(String::new, |(_, p)| p.last_line())
     }
 
     pub fn toggle(&mut self, id: &str) {
@@ -644,11 +774,12 @@ impl Runner {
             && let Some(j) = self.jobs.iter_mut().find(|j| j.state == JobState::Queued)
         {
             let mut cmd = self.cfg.command(false);
-            cmd.arg("install")
-                .arg("--select")
-                .arg(&j.id)
-                .arg("--data-dir")
-                .arg(&self.cfg.data_dir);
+            if j.archive {
+                cmd.args(&j.archive_args);
+            } else {
+                cmd.arg("install").arg("--select").arg(&j.id);
+            }
+            cmd.arg("--data-dir").arg(&self.cfg.data_dir);
             match Proc::spawn(cmd) {
                 Ok(p) => {
                     j.state = JobState::Running;
