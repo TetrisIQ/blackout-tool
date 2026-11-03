@@ -2121,7 +2121,7 @@ impl App {
                     ui.label(theme::small("Address", N800));
                     let url = ui.add(
                         egui::TextEdit::singleline(&mut req.url)
-                            .hint_text("https://projekt-gutenberg.org/bibliothek/")
+                            .hint_text("https://example.org/docs/")
                             .desired_width(480.0),
                     );
                     if url.changed() && !*id_touched {
@@ -2130,7 +2130,7 @@ impl App {
                     ui.label(theme::small("Title in the library", N800));
                     ui.add(
                         egui::TextEdit::singleline(&mut req.name)
-                            .hint_text("Projekt Gutenberg-DE")
+                            .hint_text("Example Docs")
                             .desired_width(480.0),
                     );
                     ui.horizontal(|ui| {
