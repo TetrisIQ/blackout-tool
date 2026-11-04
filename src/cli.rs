@@ -35,7 +35,7 @@ const CACHE_TTL: Duration = Duration::from_secs(24 * 3600);
     about = "Emergency offline kit: pick, size and install offline content"
 )]
 pub struct Cli {
-    /// Catalog directory (default: ./catalog, then /usr/share/emergency-kit/catalog)
+    /// Use this catalog directory alone (default: the catalogs added with `kit catalog`)
     #[arg(long, global = true, env = "KIT_CATALOG")]
     pub catalog: Option<PathBuf>,
 
@@ -93,6 +93,8 @@ pub enum Command {
     },
     /// Show or change where kit keeps its data (e.g. an external disk)
     DataDir(DataDirArgs),
+    /// Catalog repositories: add, remove, update, order and check them
+    Catalog(crate::cli_catalog::CatalogArgs),
     /// Local HTTPS for kit.local and the services (CA, Caddy, hosts); every step is reversible
     Net(crate::cli_net::NetArgs),
 }
@@ -399,7 +401,10 @@ pub fn run(cli: &Cli, out: &mut dyn Write) -> Result<Outcome> {
 /// Same as [`run`] with the network and disk lookups injected.
 pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
     let (http, space) = (env.http, env.space);
-    let catalog = load_catalog(cli.catalog.as_deref())?;
+    if let Command::Catalog(args) = &cli.command {
+        return crate::cli_catalog::catalog_cmd(args, env, cli.offline, out);
+    }
+    let catalog = crate::cli_catalog::load_catalog(cli.catalog.as_deref(), env, cli.offline)?;
     match &cli.command {
         Command::List { category, json } => list(&catalog, category.as_deref(), *json, out)?,
         Command::Show { id, json } => show(&catalog, id, *json, http, out)?,
@@ -414,6 +419,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::Status(args) => return status_cmd(args, env, out),
         Command::DataDir(args) => return data_dir_cmd(args, env, out),
         Command::Net(args) => return crate::cli_net::net_cmd(args, &catalog, env, out),
+        Command::Catalog(_) => unreachable!("handled before the catalog is loaded"),
     }
     Ok(Outcome::Ok)
 }
@@ -457,6 +463,10 @@ pub(crate) fn config_dir() -> Result<PathBuf> {
 }
 
 /// The data directory: the explicit one, else the one saved by `kit data-dir set`, else the default.
+pub(crate) fn default_data_dir() -> Result<PathBuf> {
+    xdg_dir("XDG_DATA_HOME", "")
+}
+
 pub(crate) fn data_dir_of(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     Ok(datadir::resolve(explicit.as_deref(), &config_dir()?, || {
         xdg_dir("XDG_DATA_HOME", "")
@@ -470,19 +480,7 @@ pub(crate) fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-fn load_catalog(explicit: Option<&Path>) -> Result<Catalog> {
-    let dir = match explicit {
-        Some(d) => d.to_path_buf(),
-        None => ["catalog", "/usr/share/emergency-kit/catalog"]
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.is_dir())
-            .context("no catalog found; pass --catalog <dir> or run from the repository root")?,
-    };
-    Ok(Catalog::load(&dir)?)
-}
-
-fn table(rows: &[Vec<String>], right_aligned: &[usize]) -> String {
+pub(crate) fn table(rows: &[Vec<String>], right_aligned: &[usize]) -> String {
     let cols = rows.first().map_or(0, Vec::len);
     let widths: Vec<usize> = (0..cols)
         .map(|c| rows.iter().map(|r| r[c].chars().count()).max().unwrap_or(0))
@@ -520,28 +518,42 @@ fn list(catalog: &Catalog, category: Option<&str>, json: bool, out: &mut dyn Wri
         writeln!(out, "no packages found")?;
         return Ok(());
     }
-    let mut rows = vec![
-        ["ID", "TYPE", "CATEGORY", "SIZE", "LANGUAGES", "LICENSE"]
-            .map(String::from)
-            .to_vec(),
-    ];
+    let origins = pkgs
+        .iter()
+        .filter_map(|m| catalog.origin(&m.id))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        > 1;
+    let mut head = ["ID", "TYPE", "CATEGORY", "SIZE", "LANGUAGES", "LICENSE"]
+        .map(String::from)
+        .to_vec();
+    if origins {
+        head.push("CATALOG".into());
+    }
+    let mut rows = vec![head];
     for m in pkgs {
-        rows.push(vec![
-            m.id.clone(),
-            m.kind.as_str().into(),
-            m.category.clone(),
-            match (m.source.kiwix.is_some(), m.size_bytes) {
-                (true, _) => "live".into(),
-                (false, Some(s)) => format_bytes(s),
-                (false, None) => "?".into(),
-            },
-            if m.languages.is_empty() {
-                "-".into()
-            } else {
-                m.languages.join(",")
-            },
-            m.license.spdx.clone(),
-        ]);
+        let origin = origins.then(|| catalog.origin(&m.id).unwrap_or("-").to_string());
+        rows.push(
+            vec![
+                m.id.clone(),
+                m.kind.as_str().into(),
+                m.category.clone(),
+                match (m.source.kiwix.is_some(), m.size_bytes) {
+                    (true, _) => "live".into(),
+                    (false, Some(s)) => format_bytes(s),
+                    (false, None) => "?".into(),
+                },
+                if m.languages.is_empty() {
+                    "-".into()
+                } else {
+                    m.languages.join(",")
+                },
+                m.license.spdx.clone(),
+            ]
+            .into_iter()
+            .chain(origin)
+            .collect(),
+        );
     }
     write!(out, "{}", table(&rows, &[3]))?;
     writeln!(
@@ -581,6 +593,9 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
     writeln!(out, "{} - {}", m.id, m.name)?;
     writeln!(out, "  {}", m.description)?;
     writeln!(out, "  type:       {}", m.kind.as_str())?;
+    if let Some(origin) = catalog.origin(id) {
+        writeln!(out, "  catalog:    {origin}")?;
+    }
     writeln!(out, "  category:   {}", m.category)?;
     if !m.languages.is_empty() {
         writeln!(out, "  languages:  {}", m.languages.join(", "))?;

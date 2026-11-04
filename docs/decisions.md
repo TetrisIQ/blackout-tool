@@ -314,3 +314,22 @@ One request every 500 ms, three tries per book with growing pauses, and the run 
 
 ## C3. Resumable, recorded at the end
 Each book is written as `<file>.epub.part`, checked, and renamed into `<data-dir>/media/books/<id>/`; an interrupted run keeps the finished books and the next run fetches only the missing ones (leftover `.part` files and non-EPUBs are removed first). The package is recorded in `installed.json` (one `FileRecord` per book) only when all books are there, so `kit status` shows it as installed only then. A plain re-run does not pick up books that were added to the site later (that is an update, Phase 10).
+
+---
+
+# Catalog repositories (CONFIRMED, implemented)
+
+## R1. The catalog is its own repository
+`catalog/` moved out of the kit repository (`../katalog`: manifests, `profiles/`, `catalog.yaml`, CI that runs `kit catalog check .`, a release workflow that publishes `catalog.tar.gz` and `catalog.tar.gz.sha256`). The kit keeps only a small fixture catalog for tests.
+
+## R2. Transport: HTTPS tarball + SHA-256, not git
+No `git` needed on the user's machine, and the checksum rule (rule 7) applies to the catalog too. A source is `{name, url, sha256?, enabled}` in `<config>/kit/catalogs.json`; `<url>.sha256` is read on each update unless the hash was pinned with `--sha256`. A hash served next to the archive protects against corruption and half-finished uploads, not against a hostile host; pinning does, at the price of a new pin per update. Signed catalogs are Phase 12. Plain `http://` is accepted only for the local machine.
+
+## R3. Several catalogs, first one wins
+Priority is the list order (`kit catalog move`). An id (package or profile) that an earlier catalog defines is skipped with a warning; duplicates inside one catalog stay an error. References are checked on the merged set, so a catalog may depend on packages of another. The origin is shown in `kit list` (when more than one catalog contributes) and `kit show`.
+
+## R4. Safe replacement
+Download to a work folder, verify, unpack (regular files only, any `..`/absolute path or link is refused, size capped), load the result as a catalog, then swap the directory. Anything failing leaves the previous copy in place. One wrapper directory (GitHub-style archives) is looked through.
+
+## R5. Where things live and the window
+Catalogs sit in `<data>/catalogs/<name>/` (moved along by `kit data-dir set --move`). The location of catalogs follows `KIT_DATA_DIR` or the saved place, not another command's `--data-dir`. The window has a **Catalogs…** dialog (sidebar) instead of a tab; it runs `kit catalog ...` as child processes.

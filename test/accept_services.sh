@@ -1,17 +1,17 @@
 #!/bin/sh
 # Manual Phase 6 acceptance (first slice): Navidrome with a free music pack, Audiobookshelf with a LibriVox book, Jellyfin with Big Buck Bunny, Kavita with an ebook. Needs podman, systemd
 # user services, and the Phase 4 front (caddy, sudo) for the HTTPS names. The pack is ~2.4 GB.
-# Undo: kit uninstall music_musopen_dvd navidrome librivox_alice audiobookshelf blender_big_buck_bunny jellyfin standardebooks_alice kavita --purge ; kit net enable (refresh) or disable.
+# Undo: kit uninstall navidrome audiobookshelf jellyfin  kavita --purge ; kit net enable (refresh) or disable.
 set -eu
 KIT="${KIT:-cargo run --release --quiet --}"
 
 step() { printf '\n== %s\n' "$*"; }
 
 step "1. dry run"
-$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice,jellyfin,blender_big_buck_bunny,kavita,standardebooks_alice --dry-run
+$KIT install --select navidrome,audiobookshelf,jellyfin,kavita --dry-run
 
 step "2. install (pulls the image by digest, downloads and unpacks the pack, creates the login)"
-$KIT install --select navidrome,music_musopen_dvd,audiobookshelf,librivox_alice,jellyfin,blender_big_buck_bunny,kavita,standardebooks_alice
+$KIT install --select navidrome,audiobookshelf,jellyfin,kavita
 $KIT status
 $KIT verify
 

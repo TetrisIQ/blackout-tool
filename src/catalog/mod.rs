@@ -4,6 +4,7 @@ pub mod http;
 pub mod kiwix;
 pub mod manifest;
 pub mod profile;
+pub mod remote;
 pub mod resolve;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -45,62 +46,81 @@ pub enum CatalogError {
 pub struct Catalog {
     packages: BTreeMap<String, Manifest>,
     profiles: BTreeMap<String, Profile>,
+    /// Which catalog (by name) every package came from; empty for a single directory.
+    origin: BTreeMap<String, String>,
+    warnings: Vec<String>,
 }
 
 impl Catalog {
-    /// Loads `<dir>/**/*.yaml` as manifests and `<dir>/profiles/*.yaml` as profiles.
-    /// Every problem in the whole tree is reported at once.
+    /// Loads `<dir>/**/*.yaml` as manifests and `<dir>/profiles/*.yaml` as profiles
+    /// (`<dir>/catalog.yaml` is the catalog's own metadata). Every problem in the whole tree is
+    /// reported at once.
     pub fn load(dir: &Path) -> Result<Self, CatalogError> {
-        let mut issues = Vec::new();
-        let mut manifests = Vec::new();
-        let mut profiles = Vec::new();
-        let profiles_dir = dir.join("profiles");
-
-        for path in yaml_files(dir)? {
-            let text = std::fs::read_to_string(&path).map_err(|source| CatalogError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let mut fail = |message: String| {
-                issues.push(Issue {
-                    path: Some(path.clone()),
-                    message,
-                })
-            };
-            if path.starts_with(&profiles_dir) {
-                match serde_yaml_ng::from_str::<Profile>(&text) {
-                    Ok(p) => {
-                        if p.id != stem {
-                            fail(format!("id {:?} does not match file name {stem:?}", p.id));
-                        }
-                        p.validate().into_iter().for_each(&mut fail);
-                        profiles.push(p);
-                    }
-                    Err(e) => fail(e.to_string()),
-                }
-            } else {
-                match serde_yaml_ng::from_str::<Manifest>(&text) {
-                    Ok(m) => {
-                        if m.id != stem {
-                            fail(format!("id {:?} does not match file name {stem:?}", m.id));
-                        }
-                        m.validate().into_iter().for_each(&mut fail);
-                        manifests.push(m);
-                    }
-                    Err(e) => fail(e.to_string()),
-                }
-            }
-        }
-        issues.extend(cross_check(&manifests, &profiles));
+        let (manifests, profiles, mut issues) = load_parts(dir)?;
+        issues.extend(check_duplicates(&manifests, &profiles));
+        issues.extend(check_references(&manifests, &profiles));
         if !issues.is_empty() {
             return Err(CatalogError::Invalid(issues));
         }
         Ok(Self::from_valid(manifests, profiles))
+    }
+
+    /// Loads several catalogs, `(name, dir)` in priority order. A package or profile id that an
+    /// earlier catalog already defines is skipped with a warning; references (`depends_on`,
+    /// profiles) are checked across the merged set, so one catalog may build on another.
+    pub fn load_all(sources: &[(String, PathBuf)]) -> Result<Self, CatalogError> {
+        let mut issues = Vec::new();
+        let (mut manifests, mut profiles): (Vec<Manifest>, Vec<Profile>) = (Vec::new(), Vec::new());
+        let (mut origin, mut warnings) = (BTreeMap::new(), Vec::new());
+        let mut profile_origin: HashMap<String, String> = HashMap::new();
+        for (name, dir) in sources {
+            let (ms, ps, mut found) = load_parts(dir)?;
+            found.extend(check_duplicates(&ms, &ps));
+            issues.extend(found.into_iter().map(|i| Issue {
+                path: i.path,
+                message: format!("[{name}] {}", i.message),
+            }));
+            for m in ms {
+                if let Some(first) = origin.get(&m.id) {
+                    warnings.push(format!(
+                        "package {:?} of catalog {name:?} is hidden by {first:?}",
+                        m.id
+                    ));
+                } else {
+                    origin.insert(m.id.clone(), name.clone());
+                    manifests.push(m);
+                }
+            }
+            for p in ps {
+                if let Some(first) = profile_origin.get(&p.id) {
+                    warnings.push(format!(
+                        "profile {:?} of catalog {name:?} is hidden by {first:?}",
+                        p.id
+                    ));
+                } else {
+                    profile_origin.insert(p.id.clone(), name.clone());
+                    profiles.push(p);
+                }
+            }
+        }
+        issues.extend(check_references(&manifests, &profiles));
+        if !issues.is_empty() {
+            return Err(CatalogError::Invalid(issues));
+        }
+        let mut c = Self::from_valid(manifests, profiles);
+        c.origin = origin;
+        c.warnings = warnings;
+        Ok(c)
+    }
+
+    /// The catalog a package came from (only known for [`Catalog::load_all`]).
+    pub fn origin(&self, id: &str) -> Option<&str> {
+        self.origin.get(id).map(String::as_str)
+    }
+
+    /// Hidden packages and profiles, one line each.
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
     }
 
     /// Builds a catalog from in-memory parts, running every check `load` does except the
@@ -119,7 +139,8 @@ impl Catalog {
                 message: format!("profile {}: {e}", p.id),
             }));
         }
-        issues.extend(cross_check(&manifests, &profiles));
+        issues.extend(check_duplicates(&manifests, &profiles));
+        issues.extend(check_references(&manifests, &profiles));
         if !issues.is_empty() {
             return Err(CatalogError::Invalid(issues));
         }
@@ -130,6 +151,8 @@ impl Catalog {
         Self {
             packages: manifests.into_iter().map(|m| (m.id.clone(), m)).collect(),
             profiles: profiles.into_iter().map(|p| (p.id.clone(), p)).collect(),
+            origin: BTreeMap::new(),
+            warnings: Vec::new(),
         }
     }
 
@@ -181,6 +204,61 @@ impl Catalog {
     }
 }
 
+/// Reads and validates every file of one catalog directory, without cross-file checks.
+#[allow(clippy::type_complexity)]
+fn load_parts(dir: &Path) -> Result<(Vec<Manifest>, Vec<Profile>, Vec<Issue>), CatalogError> {
+    let mut issues = Vec::new();
+    let mut manifests = Vec::new();
+    let mut profiles = Vec::new();
+    let profiles_dir = dir.join("profiles");
+    let meta = dir.join(remote::META_FILE);
+
+    for path in yaml_files(dir)? {
+        if path == meta {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).map_err(|source| CatalogError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut fail = |message: String| {
+            issues.push(Issue {
+                path: Some(path.clone()),
+                message,
+            })
+        };
+        if path.starts_with(&profiles_dir) {
+            match serde_yaml_ng::from_str::<Profile>(&text) {
+                Ok(p) => {
+                    if p.id != stem {
+                        fail(format!("id {:?} does not match file name {stem:?}", p.id));
+                    }
+                    p.validate().into_iter().for_each(&mut fail);
+                    profiles.push(p);
+                }
+                Err(e) => fail(e.to_string()),
+            }
+        } else {
+            match serde_yaml_ng::from_str::<Manifest>(&text) {
+                Ok(m) => {
+                    if m.id != stem {
+                        fail(format!("id {:?} does not match file name {stem:?}", m.id));
+                    }
+                    m.validate().into_iter().for_each(&mut fail);
+                    manifests.push(m);
+                }
+                Err(e) => fail(e.to_string()),
+            }
+        }
+    }
+    Ok((manifests, profiles, issues))
+}
+
 fn yaml_files(dir: &Path) -> Result<Vec<PathBuf>, CatalogError> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), CatalogError> {
         let io = |source| CatalogError::Io {
@@ -203,7 +281,7 @@ fn yaml_files(dir: &Path) -> Result<Vec<PathBuf>, CatalogError> {
     Ok(out)
 }
 
-fn cross_check(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
+fn check_duplicates(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
     let mut issues = Vec::new();
     let mut issue = |message: String| issues.push(Issue { path: None, message });
 
@@ -216,6 +294,19 @@ fn cross_check(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
     for id in dups {
         issue(format!("package id {id:?} is defined more than once"));
     }
+    let mut seen_profiles = HashSet::new();
+    for p in profiles {
+        if !seen_profiles.insert(p.id.as_str()) {
+            issue(format!("profile id {:?} is defined more than once", p.id));
+        }
+    }
+    issues
+}
+
+/// `depends_on`, dependency cycles and the packages named by profiles.
+fn check_references(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    let mut issue = |message: String| issues.push(Issue { path: None, message });
 
     let deps: HashMap<&str, &[String]> = manifests
         .iter()
@@ -231,12 +322,7 @@ fn cross_check(manifests: &[Manifest], profiles: &[Profile]) -> Vec<Issue> {
     for cycle in find_cycles(&deps) {
         issue(format!("dependency cycle: {}", cycle.join(" -> ")));
     }
-
-    let mut seen_profiles = HashSet::new();
     for p in profiles {
-        if !seen_profiles.insert(p.id.as_str()) {
-            issue(format!("profile id {:?} is defined more than once", p.id));
-        }
         for pkg in &p.packages {
             if pkg != crate::ai::AUTO_LLM && !deps.contains_key(pkg.as_str()) {
                 issue(format!("profile {}: unknown package {pkg:?}", p.id));
@@ -482,9 +568,88 @@ pub(crate) mod tests {
         ));
     }
 
+    fn write_catalog(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let d = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            let p = d.path().join(path);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        }
+        d
+    }
+
+    fn files_yaml(id: &str, deps: &str) -> String {
+        format!(
+            "id: {id}\nname: {id}\ndescription: d\ncategory: games\ntype: files\n\
+             source: {{url: \"https://example.org/{id}.zip\"}}\nsha256: \"{}\"\nsize_bytes: 10\n\
+             license: {{spdx: MIT}}\ndepends_on: [{deps}]\n",
+            "a".repeat(64)
+        )
+    }
+
     #[test]
-    fn shipped_catalog_is_valid() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("catalog");
+    fn several_catalogs_merge_with_the_first_one_winning() {
+        let a = write_catalog(&[
+            ("catalog.yaml", "name: a\nformat: 1\n"),
+            ("games/one.yaml", &files_yaml("one", "")),
+            (
+                "profiles/p.yaml",
+                "id: p\nname: A\ndescription: d\nbudget_bytes: 100\npackages: [one]\n",
+            ),
+        ]);
+        let b = write_catalog(&[
+            ("games/one.yaml", &files_yaml("one", "")),
+            ("games/two.yaml", &files_yaml("two", "one")),
+            (
+                "profiles/p.yaml",
+                "id: p\nname: B\ndescription: d\nbudget_bytes: 100\npackages: [two]\n",
+            ),
+        ]);
+        let c = Catalog::load_all(&[
+            ("a".into(), a.path().to_path_buf()),
+            ("b".into(), b.path().to_path_buf()),
+        ])
+        .unwrap();
+        assert_eq!(c.packages().count(), 2);
+        assert_eq!(c.origin("one"), Some("a"));
+        assert_eq!(c.origin("two"), Some("b"));
+        assert_eq!(c.profile("p").unwrap().name, "A");
+        assert_eq!(c.warnings().len(), 2, "{:?}", c.warnings());
+        assert!(c.warnings()[0].contains("\"one\"") && c.warnings()[0].contains("\"a\""));
+    }
+
+    #[test]
+    fn a_catalog_may_depend_on_another_but_not_on_nothing() {
+        let a = write_catalog(&[("games/one.yaml", &files_yaml("one", ""))]);
+        let b = write_catalog(&[("games/two.yaml", &files_yaml("two", "one"))]);
+        let both = [
+            ("a".to_string(), a.path().to_path_buf()),
+            ("b".to_string(), b.path().to_path_buf()),
+        ];
+        assert!(Catalog::load_all(&both).is_ok());
+        let Err(CatalogError::Invalid(issues)) = Catalog::load_all(&both[1..]) else {
+            panic!("dependency on a missing catalog must fail");
+        };
+        assert!(issues.iter().any(|i| i.message.contains("unknown package")));
+    }
+
+    #[test]
+    fn errors_name_their_catalog_and_the_metadata_file_is_not_a_manifest() {
+        let a = write_catalog(&[
+            ("catalog.yaml", "name: a\nformat: 1\n"),
+            ("games/bad.yaml", "id: bad\n"),
+        ]);
+        let Err(CatalogError::Invalid(issues)) = Catalog::load_all(&[("a".into(), a.path().to_path_buf())])
+        else {
+            panic!("invalid manifest must fail");
+        };
+        assert!(issues.iter().all(|i| i.message.starts_with("[a] ")), "{issues:?}");
+        assert_eq!(issues.len(), 1, "catalog.yaml is not reported: {issues:?}");
+    }
+
+    #[test]
+    fn fixture_catalog_is_valid() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/catalog_shipped");
         let c = Catalog::load(&dir).unwrap();
         assert!(c.packages().count() > 0);
         for name in ["mini", "standard", "full"] {

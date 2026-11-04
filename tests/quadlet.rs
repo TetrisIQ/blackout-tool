@@ -25,7 +25,12 @@ fn shipped_container_packages_are_valid_quadlet() {
         eprintln!("quadlet not found, skipping");
         return;
     };
-    let catalog = Catalog::load(Path::new(env!("CARGO_MANIFEST_DIR")).join("catalog").as_path()).unwrap();
+    let catalog = Catalog::load(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/catalog_shipped")
+            .as_path(),
+    )
+    .unwrap();
     let d = tempfile::tempdir().unwrap();
     let paths = Paths::new(d.path().join("data"), d.path().join("units")).unwrap();
     let mut seen = 0;

@@ -48,7 +48,7 @@ fn fake_kit(dir: &Path, body: &str) -> Config {
     .unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     Config {
-        catalog_dir: dir.join("catalog"),
+        catalog_dir: Some(dir.join("catalog")),
         data_dir: dir.join("data"),
         cache_dir: dir.join("cache"),
         kit_bin: script,
@@ -385,4 +385,44 @@ fn a_failed_crawl_stays_in_the_queue_with_the_reason() {
         ev.iter().any(|e| matches!(e, Event::Failed { .. }))
     });
     assert_eq!(r.jobs[0].state, JobState::Failed("the crawl failed".into()));
+}
+
+#[test]
+fn catalogs_are_listed_from_json_and_actions_report_output_or_the_error() {
+    use emergency_kit::ui::backend::{catalog_action, catalog_rows};
+    let _serial = serial();
+    let d = tempfile::tempdir().unwrap();
+    let cfg = fake_kit(
+        d.path(),
+        r#"case "$*" in
+  *"catalog list --json"*) echo '[{"name":"main","url":"https://x/c.tar.gz","enabled":true,"pinned":false,"fetched":true,"sha256":"ab","packages":3,"error":null}]' ;;
+  *"catalog add bad"*) echo "error: checksum mismatch for https://x" >&2; exit 1 ;;
+  *) echo "done" ;;
+esac"#,
+    );
+    let rows = catalog_rows(&cfg).unwrap();
+    assert_eq!((rows[0].name.as_str(), rows[0].packages), ("main", Some(3)));
+    assert_eq!(
+        catalog_action(&cfg, &["disable".into(), "main".into()]).unwrap(),
+        "done"
+    );
+    let err = catalog_action(&cfg, &["add".into(), "bad".into(), "https://x".into()]).unwrap_err();
+    assert_eq!(err, "checksum mismatch for https://x");
+    let calls = std::fs::read_to_string(d.path().join("calls")).unwrap();
+    let lines: Vec<&str> = calls.lines().collect();
+    assert!(
+        lines[0].contains("--offline") && lines[0].contains("catalog list --json --data-dir"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[1].contains("catalog disable main") && !lines[1].contains("--data-dir"),
+        "{}",
+        lines[1]
+    );
+    assert!(
+        !lines[2].contains("--offline") && lines[2].contains("catalog add bad https://x --data-dir"),
+        "{}",
+        lines[2]
+    );
 }

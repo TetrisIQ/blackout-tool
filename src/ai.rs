@@ -275,7 +275,10 @@ mod tests {
                 })
             }
         }
-        let cat = Catalog::load(std::path::Path::new("catalog")).unwrap();
+        let cat = Catalog::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/catalog_shipped"),
+        )
+        .unwrap();
         let mut ids = vec!["archwiki_en".to_string(), AUTO_LLM.to_string()];
         let line = expand_auto(&mut ids, &cat, &Sizes, &hw(20, Some(24)))
             .unwrap()

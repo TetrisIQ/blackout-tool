@@ -39,6 +39,9 @@ enum Msg {
     Active(HashMap<String, bool>),
     Health(bool, String),
     Restarted(String),
+    CatalogRows(Result<Vec<crate::cli_catalog::Row>, String>),
+    /// A `kit catalog` action finished: what it printed, or why it failed.
+    CatalogDone(Result<String, String>),
 }
 
 struct Wiz {
@@ -73,6 +76,7 @@ enum Act {
     HealthCheck,
     ChangeLocation,
     ArchiveWebsite,
+    Catalogs,
 }
 
 pub struct App {
@@ -92,6 +96,8 @@ pub struct App {
     loc: Option<Location>,
     /// The "Archive a website" dialog: the request being typed and the last error.
     archive: Option<ArchiveDialog>,
+    /// The "Catalogs" dialog.
+    catalogs: Option<CatalogDialog>,
     done: Vec<(String, bool, Instant)>,
     failures: Vec<String>,
     online: bool,
@@ -114,6 +120,17 @@ struct ArchiveDialog {
     id_touched: bool,
 }
 
+struct CatalogDialog {
+    rows: Vec<crate::cli_catalog::Row>,
+    name: String,
+    url: String,
+    sha256: String,
+    /// A `kit catalog` command is running.
+    busy: bool,
+    /// Last result: (is error, text).
+    note: Option<(bool, String)>,
+}
+
 struct Location {
     text: String,
     move_data: bool,
@@ -121,7 +138,7 @@ struct Location {
 }
 
 /// Developer aid: `KIT_GUI_SHOT=file.ppm` saves the window after a few seconds and quits;
-/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location|archive` picks the page.
+/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location|archive|catalogs` picks the page.
 struct Snapshot {
     path: std::path::PathBuf,
     frames: u32,
@@ -145,6 +162,7 @@ impl App {
             wiz: None,
             loc: None,
             archive: None,
+            catalogs: None,
             done: Vec::new(),
             failures: Vec::new(),
             online: true,
@@ -182,6 +200,27 @@ impl App {
                 .map(Box::new)
                 .map_err(|e| format!("{e:#}"));
             let _ = tx.send(Msg::Loaded { data, live: !offline });
+            ctx.request_repaint();
+        });
+    }
+
+    fn spawn_catalog_rows(&self, ctx: &egui::Context) {
+        let (cfg, tx, ctx) = (self.cfg.clone(), self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::CatalogRows(backend::catalog_rows(&cfg)));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Runs `kit catalog <args>` off the UI thread; the answer comes back as `Msg::CatalogDone`.
+    fn run_catalog(&mut self, ctx: &egui::Context, args: Vec<String>) {
+        if let Some(d) = &mut self.catalogs {
+            d.busy = true;
+            d.note = None;
+        }
+        let (cfg, tx, ctx) = (self.cfg.clone(), self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::CatalogDone(backend::catalog_action(&cfg, &args)));
             ctx.request_repaint();
         });
     }
@@ -291,6 +330,35 @@ impl App {
                     self.checking_health = false;
                     self.health = Some((ok, text));
                 }
+                Msg::CatalogRows(rows) => {
+                    if let Some(d) = &mut self.catalogs {
+                        match rows {
+                            Ok(r) => d.rows = r,
+                            Err(e) => d.note = Some((true, e)),
+                        }
+                    }
+                }
+                Msg::CatalogDone(result) => {
+                    let ok = result.is_ok();
+                    if let Some(d) = &mut self.catalogs {
+                        d.busy = false;
+                        d.note = Some(match result {
+                            Ok(t) => {
+                                if t.starts_with("added ") {
+                                    d.name.clear();
+                                    d.url.clear();
+                                    d.sha256.clear();
+                                }
+                                (false, t)
+                            }
+                            Err(e) => (true, e),
+                        });
+                    }
+                    self.spawn_catalog_rows(ctx);
+                    if ok {
+                        self.spawn_load(ctx, !self.online);
+                    }
+                }
                 Msg::Restarted(unit) => {
                     self.restarting.remove(&unit);
                     self.spawn_active(ctx);
@@ -365,6 +433,17 @@ impl App {
                     move_data: self.ws.as_ref().is_some_and(|w| !w.installed.is_empty()),
                     error: None,
                 });
+            }
+            Act::Catalogs => {
+                self.catalogs = Some(CatalogDialog {
+                    rows: Vec::new(),
+                    name: String::new(),
+                    url: String::new(),
+                    sha256: String::new(),
+                    busy: false,
+                    note: None,
+                });
+                self.spawn_catalog_rows(ctx);
             }
             Act::ArchiveWebsite => {
                 self.archive = Some(ArchiveDialog {
@@ -492,6 +571,9 @@ impl App {
                 id_touched: true,
             });
         }
+        if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("catalogs") {
+            self.act(ctx, Act::Catalogs);
+        }
         if frames == 100 && std::env::var("KIT_GUI_TAB").as_deref() == Ok("wizard") {
             self.open_wizard();
         }
@@ -608,6 +690,7 @@ impl eframe::App for App {
         self.wizard(&ctx);
         self.location(&ctx);
         self.archive_dialog(&ctx);
+        self.catalog_dialog(&ctx);
         self.take_snapshot(&ctx);
         for a in acts {
             self.act(&ctx, a);
@@ -984,6 +1067,25 @@ impl App {
                     .clicked()
                 {
                     acts.push(Act::ArchiveWebsite);
+                }
+
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, 4.0, N200);
+                }
+                ui.painter().text(
+                    rect.left_center() + vec2(10.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    "Catalogs\u{2026}",
+                    FontId::proportional(13.0),
+                    TEXT,
+                );
+                if resp
+                    .on_hover_text("Where the package lists come from; add more catalogs")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    acts.push(Act::Catalogs);
                 }
 
                 ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -2200,6 +2302,126 @@ impl App {
         }
         if close {
             self.archive = None;
+        }
+    }
+
+    /// The catalogs kit reads, in priority order; add, remove, reorder, update. The work is
+    /// `kit catalog ...`, so the window stays responsive.
+    fn catalog_dialog(&mut self, ctx: &egui::Context) {
+        let Some(d) = &mut self.catalogs else {
+            return;
+        };
+        let (mut close, mut run): (bool, Option<Vec<String>>) = (false, None);
+        let n = d.rows.len();
+        #[allow(deprecated)]
+        let modal = Modal::new(egui::Id::new("catalogs"))
+            .backdrop_color(Color32::from_rgba_unmultiplied(0x2d, 0x2b, 0x2b, 82))
+            .frame(
+                Frame::new()
+                    .fill(BG)
+                    .stroke(Stroke::new(1.0, N500))
+                    .corner_radius(CornerRadius::same(12)),
+            );
+        modal.show(ctx, |ui| {
+            ui.set_width(600.0);
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(theme::heading("Catalogs", 16.0));
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.vertical(|ui| {
+                    ui.label(theme::small(
+                        "A catalog is a list of packages kept in its own repository. The one at the top wins when \
+                         two catalogs offer the same id. Catalogs are checked by SHA-256 before they are used.",
+                        N700,
+                    ));
+                    for (i, r) in d.rows.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            let state = match (r.enabled, r.fetched, &r.error) {
+                                (false, _, _) => "disabled".to_string(),
+                                (true, false, _) => "not downloaded".to_string(),
+                                (true, true, Some(_)) => "invalid".to_string(),
+                                (true, true, None) => format!("{} packages", r.packages.unwrap_or(0)),
+                            };
+                            ui.label(theme::small(format!("{}. {} \u{b7} {state}", i + 1, r.name), TEXT))
+                                .on_hover_text(&r.url);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let free = !d.busy;
+                                if button(ui, "Remove", BtnKind::Ghost, free) {
+                                    run = Some(vec!["remove".into(), r.name.clone()]);
+                                }
+                                let verb = if r.enabled { "Disable" } else { "Enable" };
+                                if button(ui, verb, BtnKind::Ghost, free) {
+                                    run = Some(vec![verb.to_lowercase(), r.name.clone()]);
+                                }
+                                if button(ui, "Down", BtnKind::Ghost, free && i + 1 < n) {
+                                    run = Some(vec!["move".into(), r.name.clone(), (i + 2).to_string()]);
+                                }
+                                if button(ui, "Up", BtnKind::Ghost, free && i > 0) {
+                                    run = Some(vec!["move".into(), r.name.clone(), i.to_string()]);
+                                }
+                            });
+                        });
+                        if let Some(e) = &r.error {
+                            ui.label(theme::small(e.clone(), Color32::from_rgb(0xa8, 0x32, 0x2d)));
+                        }
+                    }
+                    ui.separator();
+                    ui.label(theme::small("Add a catalog", N800));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut d.name)
+                            .hint_text("name (a-z, 0-9, - and _)")
+                            .desired_width(560.0),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut d.url)
+                            .hint_text("https://example.org/releases/latest/download/catalog.tar.gz")
+                            .desired_width(560.0),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut d.sha256)
+                            .hint_text("SHA-256 to pin (optional)")
+                            .desired_width(560.0),
+                    );
+                    if d.busy {
+                        ui.label(theme::small("Working\u{2026}", N700));
+                    }
+                    if let Some((is_err, text)) = &d.note {
+                        let color = if *is_err { Color32::from_rgb(0xa8, 0x32, 0x2d) } else { N700 };
+                        ui.label(theme::small(text.clone(), color));
+                    }
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    let can_add = !d.busy && !d.name.trim().is_empty() && !d.url.trim().is_empty();
+                    if button(ui, "Add", BtnKind::Primary, can_add) {
+                        let mut a = vec!["add".to_string(), d.name.trim().into(), d.url.trim().into()];
+                        if !d.sha256.trim().is_empty() {
+                            a.extend(["--sha256".to_string(), d.sha256.trim().into()]);
+                        }
+                        run = Some(a);
+                    }
+                    if button(ui, "Update all", BtnKind::Secondary, !d.busy) {
+                        run = Some(vec!["update".into()]);
+                    }
+                    if button(ui, "Close", BtnKind::Ghost, true) {
+                        close = true;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+        });
+        if let Some(args) = run {
+            self.run_catalog(ctx, args);
+        }
+        if close {
+            self.catalogs = None;
         }
     }
 

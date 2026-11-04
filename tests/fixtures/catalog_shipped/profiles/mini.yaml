@@ -1,0 +1,8 @@
+id: mini
+name: mini
+description: Fixture profile.
+budget_bytes: 50000000000
+packages:
+  - archwiki_en
+  - wikivoyage_en_nopic
+  - llm_auto

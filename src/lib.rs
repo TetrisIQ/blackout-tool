@@ -5,6 +5,7 @@ pub mod ai;
 pub mod archive;
 pub mod catalog;
 pub mod cli;
+pub mod cli_catalog;
 pub mod cli_net;
 pub mod datadir;
 pub mod diskspace;

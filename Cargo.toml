@@ -38,6 +38,7 @@ thiserror = "2.0.21"
 ureq = "3.5.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = "1.1.10"
+tar = { version = "0.4", default-features = false }
 eframe = { version = "0.37", optional = true }
 
 [dev-dependencies]

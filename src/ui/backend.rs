@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 
 use super::model::{Installed, Pkg, ProfileDef};
-use crate::catalog::Catalog;
 use crate::catalog::http::{CachedHttp, UreqHttp};
 use crate::catalog::resolve::{LiveResolver, Resolver};
 use crate::download;
@@ -26,7 +25,8 @@ const CACHE_TTL: Duration = Duration::from_secs(24 * 3600);
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub catalog_dir: PathBuf,
+    /// `KIT_CATALOG`: one catalog directory used alone. Otherwise the catalogs of `kit catalog`.
+    pub catalog_dir: Option<PathBuf>,
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
     /// The `kit` executable that installs and removes.
@@ -37,22 +37,9 @@ impl Config {
     pub fn discover() -> Result<Self> {
         let exe = std::env::current_exe().ok();
         let exe_dir = exe.as_deref().and_then(Path::parent).map(Path::to_path_buf);
-        let mut catalogs: Vec<PathBuf> = std::env::var_os("KIT_CATALOG")
-            .map(PathBuf::from)
-            .into_iter()
-            .collect();
-        catalogs.push("catalog".into());
-        // target/release/kit-gui -> repository root
-        catalogs.extend(
-            exe_dir
-                .iter()
-                .flat_map(|d| d.ancestors().take(4).map(|a| a.join("catalog"))),
-        );
-        catalogs.push("/usr/share/emergency-kit/catalog".into());
-        let catalog_dir = catalogs
-            .into_iter()
-            .find(|p| p.join("profiles").is_dir())
-            .context("no catalog found; set KIT_CATALOG or start from the repository root")?;
+        let catalog_dir = std::env::var_os("KIT_CATALOG")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from);
         let cache_dir = match std::env::var_os("KIT_CACHE_DIR").filter(|v| !v.is_empty()) {
             Some(d) => PathBuf::from(d),
             None => match std::env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()) {
@@ -97,10 +84,10 @@ impl Config {
 
     fn command(&self, offline: bool) -> Command {
         let mut c = Command::new(&self.kit_bin);
-        c.arg("--catalog")
-            .arg(&self.catalog_dir)
-            .arg("--cache-dir")
-            .arg(&self.cache_dir);
+        if let Some(dir) = &self.catalog_dir {
+            c.arg("--catalog").arg(dir);
+        }
+        c.arg("--cache-dir").arg(&self.cache_dir);
         if offline {
             c.arg("--offline");
         }
@@ -134,8 +121,14 @@ pub struct ServiceInfo {
 /// Reads the catalog and resolves sizes. With `offline` only the cache is used, so this returns
 /// at once; packages whose live size is not cached fall back to the manifest, or to 0 (unknown).
 pub fn load(cfg: &Config, offline: bool) -> Result<Loaded> {
-    let catalog = Catalog::load(&cfg.catalog_dir)?;
     let http = CachedHttp::new(UreqHttp::default(), cfg.cache_dir.clone(), CACHE_TTL, offline);
+    let catalog = crate::cli_catalog::load_sources(
+        cfg.catalog_dir.as_deref(),
+        &crate::cli::config_dir()?,
+        &cfg.data_dir,
+        &UreqHttp::default(),
+        offline,
+    )?;
     let resolver = LiveResolver::new(&http);
     let pkgs = catalog
         .packages()
@@ -282,6 +275,47 @@ pub fn open_url(url: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
+}
+
+/// The catalogs in priority order (`kit catalog list --json`).
+pub fn catalog_rows(cfg: &Config) -> Result<Vec<crate::cli_catalog::Row>, String> {
+    let out = cfg
+        .command(true)
+        .args(["catalog", "list", "--json", "--data-dir"])
+        .arg(&cfg.data_dir)
+        .output()
+        .map_err(|e| format!("Could not run kit: {e}"))?;
+    if !out.status.success() {
+        return Err(first_error_line(&out.stderr));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("Unexpected answer from kit: {e}"))
+}
+
+/// Runs one `kit catalog <args>` (online for `add` and `update`) and returns what it printed,
+/// or its error message.
+pub fn catalog_action(cfg: &Config, args: &[String]) -> Result<String, String> {
+    let verb = args.first().map(String::as_str);
+    let mut cmd = cfg.command(!matches!(verb, Some("add" | "update")));
+    cmd.arg("catalog").args(args);
+    if matches!(verb, Some("add" | "update" | "remove")) {
+        cmd.arg("--data-dir").arg(&cfg.data_dir);
+    }
+    let out = cmd.output().map_err(|e| format!("Could not run kit: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        Err(format!("{}{}", stdout.trim_end(), first_error_line(&out.stderr)))
+    }
+}
+
+fn first_error_line(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    text.lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim().strip_prefix("error: ").unwrap_or(l.trim()).to_string())
+        .unwrap_or_else(|| "kit failed without a message".into())
 }
 
 /// `kit verify`: whether it passed and its report.
