@@ -2378,7 +2378,7 @@ impl App {
                     );
                     ui.add(
                         egui::TextEdit::singleline(&mut d.url)
-                            .hint_text("https://github.com/owner/catalog-repo")
+                            .hint_text("https://github.com/owner/catalog-repo or a folder like /home/me/katalog")
                             .desired_width(560.0),
                     );
                     ui.add(

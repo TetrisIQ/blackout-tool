@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Offline maps</title>
 <link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
   /* set by the portal's reading frame so the page follows its theme switch */
@@ -17,31 +18,27 @@
   header { display: flex; gap: .75rem; align-items: center; padding: .5rem 1rem; flex-wrap: wrap; }
   header a { margin-right: auto; }
   select, button { font-size: 1rem; padding: .3rem .6rem; }
+  #pois { display: flex; gap: .25rem .9rem; flex-wrap: wrap; padding: 0 1rem .5rem; font-size: .95rem; }
+  #pois label { display: inline-flex; gap: .3rem; align-items: center; cursor: pointer; }
+  #pois i { width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #0006; }
   #map { flex: 1; min-height: 12rem; }
   #msg { padding: .5rem 1rem; }
-  #find { position: relative; flex: 1 1 14rem; max-width: 24rem; }
-  #q { width: 100%; box-sizing: border-box; font-size: 1rem; padding: .3rem .6rem; }
-  #hits { position: absolute; z-index: 1000; left: 0; right: 0; top: 100%; margin: 0; padding: 0;
-          list-style: none; max-height: 50vh; overflow: auto; background: Canvas; color: CanvasText;
-          border: 1px solid GrayText; }
-  #hits li { padding: .35rem .6rem; cursor: pointer; }
-  #hits li:hover, #hits li.on { background: Highlight; color: HighlightText; }
-  #hits small { opacity: .7; }
+  .leaflet-container { font: inherit; }
 </style>
 <script>if (self !== top) document.documentElement.classList.add('framed');</script>
 </head>
 <body>
 <header>
   <a href="/">Offline kit</a>
-  <div id="find"><input id="q" type="search" placeholder="Search a place" autocomplete="off" hidden>
-    <ul id="hits" hidden></ul></div>
   <label>Region <select id="region"></select></label>
   <button id="locate" type="button">My position</button>
 </header>
+<div id="pois" aria-label="Points of interest"></div>
 <div id="msg" hidden></div>
 <div id="map"></div>
 <script src="vendor/leaflet.js"></script>
-<script src="vendor/protomaps-leaflet.js"></script>
+<script src="vendor/maplibre-gl.js"></script>
+<script src="vendor/leaflet-maplibre-gl.js"></script>
 <script>
 (async () => {
   const msg = document.getElementById('msg');
@@ -54,69 +51,157 @@
   }
   if (!regions.length) return fail('No maps are installed.');
 
-  const map = L.map('map', { zoomControl: true, attributionControl: true });
-  let layer = null;
+  // Points of interest drawn on top of the base map from the `poi` layer of the same tiles.
+  // `match` lists OpenMapTiles classes/subclasses; `zoom` is the zoom from which they show.
+  const GROUPS = [
+    { id: 'water', label: 'Drinking water', color: '#0b6fd6', zoom: 9, match: ['drinking_water'] },
+    { id: 'shelter', label: 'Shelter & camping', color: '#2e7d32', zoom: 10, match: ['shelter', 'campsite', 'camp_site', 'caravan_site', 'alpine_hut', 'wilderness_hut'] },
+    { id: 'medical', label: 'Medical', color: '#d32f2f', zoom: 10, match: ['hospital', 'clinic', 'doctors', 'pharmacy', 'dentist'] },
+    { id: 'emergency', label: 'Police & fire', color: '#6a1b9a', zoom: 10, match: ['police', 'fire_station'] },
+    { id: 'supplies', label: 'Food & fuel', color: '#ef6c00', zoom: 12, match: ['supermarket', 'grocery', 'bakery', 'butcher', 'fuel', 'marketplace'] },
+    { id: 'toilets', label: 'Toilets', color: '#546e7a', zoom: 12, match: ['toilets'] },
+  ];
+  const on = Object.fromEntries(GROUPS.map((g) => [g.id, g.id === 'water' || g.id === 'shelter' || g.id === 'medical']));
+  const layerOf = (g) => 'kit-poi-' + g.id;
+
+  const box = document.getElementById('pois');
+  for (const g of GROUPS) {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = on[g.id];
+    const dot = document.createElement('i');
+    dot.style.background = g.color;
+    label.append(cb, dot, g.label);
+    cb.addEventListener('change', () => { on[g.id] = cb.checked; applyVisibility(); });
+    box.append(label);
+  }
+
+  const map = L.map('map', { zoomControl: true, attributionControl: true, maxZoom: 18 });
   const select = document.getElementById('region');
   regions.forEach((r, i) => select.add(new Option(r.name, i)));
+  let layer = null, region = null;
 
-  function show(i) {
-    const r = regions[i];
+  const dark = () => {
+    const t = document.documentElement.dataset.theme;
+    return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+
+  // The book serves its own tiles, style, fonts and sprites under /content/<book>/. The style
+  // names them relative to itself; MapLibre needs absolute URLs.
+  async function styleOf(book) {
+    const base = location.origin + '/content/' + encodeURIComponent(book) + '/';
+    const style = await (await fetch(base + 'assets/' + (dark() ? 'kiwix-dark' : 'kiwix-light'))).json();
+    const abs = (u) => (u && u.startsWith('./') ? base + u.slice(2) : u);
+    style.sprite = abs(style.sprite);
+    style.glyphs = abs(style.glyphs);
+    for (const [name, s] of Object.entries(style.sources)) {
+      if (s.url) {
+        // The TileJSON names its tiles relative to itself too, so inline it with absolute URLs.
+        const tj = await (await fetch(abs(s.url))).json();
+        tj.tiles = tj.tiles.map((t) => base + t.replace(/^\.\//, ''));
+        style.sources[name] = { ...tj, type: s.type };
+      } else if (s.tiles) {
+        s.tiles = s.tiles.map(abs);
+      }
+    }
+    return style;
+  }
+
+  function matchFilter(g) {
+    const list = ['literal', g.match];
+    return ['any', ['in', ['get', 'class'], list], ['in', ['get', 'subclass'], list]];
+  }
+
+  function addPois(gl) {
+    for (const g of GROUPS) {
+      gl.addLayer({
+        id: layerOf(g), type: 'circle', source: 'openmaptiles', 'source-layer': 'poi',
+        minzoom: g.zoom, filter: matchFilter(g),
+        layout: { visibility: on[g.id] ? 'visible' : 'none' },
+        paint: {
+          'circle-color': g.color, 'circle-stroke-color': '#fff', 'circle-stroke-width': 2,
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], g.zoom, 4, 14, 8],
+        },
+      });
+      gl.addLayer({
+        id: layerOf(g) + '-name', type: 'symbol', source: 'openmaptiles', 'source-layer': 'poi',
+        minzoom: Math.max(g.zoom + 2, 13), filter: ['all', matchFilter(g), ['has', 'name']],
+        layout: {
+          visibility: on[g.id] ? 'visible' : 'none',
+          'text-field': ['coalesce', ['get', 'name:latin'], ['get', 'name']],
+          'text-font': ['Noto Sans Regular'], 'text-size': 11,
+          'text-anchor': 'top', 'text-offset': [0, .9], 'text-optional': true,
+        },
+        paint: { 'text-color': '#222', 'text-halo-color': '#fff', 'text-halo-width': 1.4 },
+      });
+    }
+  }
+
+  function applyVisibility() {
+    const gl = layer && layer.getMaplibreMap();
+    if (!gl || !gl.getLayer(layerOf(GROUPS[0]))) return;
+    for (const g of GROUPS) {
+      const v = on[g.id] ? 'visible' : 'none';
+      gl.setLayoutProperty(layerOf(g), 'visibility', v);
+      gl.setLayoutProperty(layerOf(g) + '-name', 'visibility', v);
+    }
+  }
+
+  const KINDS = {};
+  for (const g of GROUPS) for (const m of g.match) KINDS[m] = g;
+  const words = (t) => t.replace(/_/g, ' ');
+
+  // Click on a point of interest: Leaflet owns the pointer events, so ask the GL map what is there.
+  map.on('click', (e) => {
+    const gl = layer && layer.getMaplibreMap();
+    if (!gl) return;
+    // The GL canvas is larger than the map (padding), so project the position instead of reusing the click point.
+    const p = gl.project([e.latlng.lng, e.latlng.lat]), r = 10;
+    const layers = GROUPS.filter((g) => on[g.id]).map(layerOf);
+    if (!layers.length) return;
+    const hit = gl.queryRenderedFeatures([[p.x - r, p.y - r], [p.x + r, p.y + r]], { layers })[0];
+    if (!hit) return;
+    const pr = hit.properties, g = KINDS[pr.class] || KINDS[pr.subclass];
+    const el = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = pr.name || (g ? g.label : words(pr.class || 'Place'));
+    const sub = document.createElement('div');
+    sub.textContent = words(pr.subclass || pr.class || '');
+    el.append(title, sub);
+    const [lng, lat] = hit.geometry.coordinates;
+    L.popup().setLatLng([lat, lng]).setContent(el).openOn(map);
+  });
+
+  async function show(i) {
+    region = regions[i];
+    msg.hidden = true;
+    let style;
+    try {
+      style = await styleOf(region.book);
+    } catch (e) {
+      return fail('The map ' + region.name + ' could not be read.');
+    }
+    // Leaflet creates the GL map only once the map has a view, so frame the region first.
+    try {
+      const c = await (await fetch('/content/' + encodeURIComponent(region.book) + '/content/config.json')).json();
+      const [[w, s], [e, n]] = c.boundingBox;
+      map.fitBounds([[s, w], [n, e]]);
+    } catch (e) {
+      if (!map._loaded) map.setView([0, 0], 2);
+    }
     if (layer) map.removeLayer(layer);
-    layer = protomapsL.leafletLayer({
-      url: r.file,
-      flavor: 'light',
-      attribution: '&copy; OpenStreetMap contributors (ODbL) &middot; Protomaps',
+    layer = L.maplibreGL({
+      style,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &middot; OpenFreeMap &middot; OpenMapTiles',
     });
     layer.addTo(map);
-    const [w, s, e, n] = r.bbox;
-    map.setMaxZoom(r.maxzoom);
-    map.fitBounds([[s, w], [n, e]]);
+    const gl = layer.getMaplibreMap();
+    gl.on('error', (e) => console.warn('map:', e.error && e.error.message));
+    gl.once('load', () => addPois(gl));
   }
-  select.addEventListener('change', () => { show(select.value); loadPlaces(); });
+  select.addEventListener('change', () => show(select.value));
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => show(select.value));
   show(0);
-
-  // Place search: a list of named places per region, read on first use, searched in memory.
-  const q = document.getElementById('q'), hits = document.getElementById('hits');
-  const zoomFor = { country: 5, region: 7, city: 11, town: 12, village: 13, hamlet: 13 };
-  let places = [];
-  async function loadPlaces() {
-    places = [];
-    const r = regions[select.value];
-    q.hidden = !r.places;
-    if (!r.places) return;
-    try { places = await (await fetch(r.places)).json(); } catch (e) { q.hidden = true; }
-  }
-  const norm = (t) => t.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-  function search() {
-    const t = norm(q.value.trim());
-    hits.replaceChildren();
-    if (!t) { hits.hidden = true; return; }
-    const starts = [], inside = [];
-    for (const p of places) {                       // places are sorted biggest first
-      const n = norm(p[0]);
-      if (n.startsWith(t)) starts.push(p); else if (n.includes(t)) inside.push(p);
-      if (starts.length >= 8) break;
-    }
-    for (const p of starts.concat(inside).slice(0, 8)) {
-      const li = document.createElement('li');
-      li.textContent = p[0] + ' ';
-      const small = document.createElement('small');
-      small.textContent = p[3];
-      li.append(small);
-      li.addEventListener('click', () => {
-        map.setView([p[2], p[1]], Math.min(zoomFor[p[3]] || 13, map.getMaxZoom()));
-        hits.hidden = true; q.value = p[0];
-      });
-      hits.append(li);
-    }
-    hits.hidden = !hits.children.length;
-  }
-  q.addEventListener('input', search);
-  q.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && hits.firstChild) hits.firstChild.click();
-    if (e.key === 'Escape') hits.hidden = true;
-  });
-  loadPlaces();
 
   let marker = null;
   document.getElementById('locate').addEventListener('click', () => {
@@ -125,7 +210,7 @@
       const at = [p.coords.latitude, p.coords.longitude];
       if (marker) marker.remove();
       marker = L.circleMarker(at, { radius: 8 }).addTo(map);
-      map.setView(at, Math.min(14, map.getMaxZoom()));
+      map.setView(at, 14);
       msg.hidden = true;
     }, () => fail('Your position is not available (no GPS or permission denied).'));
   });

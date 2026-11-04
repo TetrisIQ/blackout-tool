@@ -636,13 +636,6 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
             t.from, t.to
         )?;
     }
-    if let Some(r) = &m.source.map {
-        writeln!(
-            out,
-            "  region:     bbox {:?}, up to zoom {} (cut from the newest Protomaps build)",
-            r.bbox, r.maxzoom
-        )?;
-    }
     if let Some(g) = &m.group {
         writeln!(out, "  group:      {g}")?;
     }
@@ -1076,15 +1069,6 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
                 .and_then(|m| m.content.as_ref())
                 .is_some_and(|c| paths.media_dir(&c.media).join(&item.id).exists());
     }
-    if item.kind == crate::catalog::PackageType::Map {
-        // The region comes from whichever build was newest at install time; it is kept until
-        // the user reinstalls (updates are Phase 10). A map without its place index is not
-        // current: running the installer again builds it (maps installed before the search).
-        let dir = paths.maps_dir();
-        return r.map.is_some()
-            && dir.join(format!("{}.pmtiles", item.id)).exists()
-            && dir.join(install::map::places_name(&item.id)).exists();
-    }
     r.files.len() == 1
         && Some(&r.files[0].sha256) == item.sha256.as_ref()
         && (item.kind != crate::catalog::PackageType::Zim
@@ -1114,7 +1098,6 @@ fn install_input(
         content: manifest.content.clone(),
         flatpak: manifest.source.flatpak.clone(),
         group: manifest.group.clone(),
-        map: manifest.source.map.clone(),
         collection: manifest.source.collection,
         ollama: manifest.source.ollama.clone(),
         translation: manifest.source.translation.clone(),
@@ -1134,9 +1117,6 @@ fn ensure_tools_for(ctx: &Ctx, kinds: &[crate::catalog::PackageType], has_zims: 
     }
     if kinds.contains(&T::Model) {
         tools::require("ollama", &ctx.search_path)?;
-    }
-    if kinds.contains(&T::Map) {
-        tools::require("pmtiles", &ctx.search_path)?;
     }
     // Collections need no program: kit fetches the books itself.
     if kinds.contains(&T::Container) {
@@ -1169,17 +1149,7 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
         }
     }
     // Fail before downloading gigabytes if installing cannot work.
-    // (A map that only lacks its place index is rebuilt from the file; that needs no tool.)
-    let kinds: Vec<_> = plan
-        .items
-        .iter()
-        .filter(|i| {
-            i.kind != crate::catalog::PackageType::Map
-                || !paths.maps_dir().join(format!("{}.pmtiles", i.id)).exists()
-                || !prior.packages.contains_key(&i.id)
-        })
-        .map(|i| i.kind)
-        .collect();
+    let kinds: Vec<_> = plan.items.iter().map(|i| i.kind).collect();
     ensure_tools_for(&ctx, &kinds, !prior.library_files().is_empty())?;
 
     for item in plan

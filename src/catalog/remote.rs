@@ -191,19 +191,65 @@ pub fn validate_sha256(hex: &str) -> Result<(), RemoteError> {
     }
 }
 
+/// Whether `location` names a folder on this machine (`/abs/path`, `~/path`, `./rel`, `../rel`,
+/// `file:///abs/path`) rather than a URL.
+pub fn is_local_location(location: &str) -> bool {
+    location.starts_with("file://")
+        || location.starts_with(['/', '~'])
+        || location.starts_with("./")
+        || location.starts_with("../")
+        || location == "."
+        || location == ".."
+}
+
+/// The absolute path of a local catalog folder; it has to exist.
+fn resolve_local(location: &str) -> Result<PathBuf, RemoteError> {
+    let raw = location.strip_prefix("file://").unwrap_or(location);
+    let path = match raw.strip_prefix("~/") {
+        Some(rest) => std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(rest))
+            .ok_or_else(|| RemoteError::Invalid("cannot expand ~: HOME is not set".into()))?,
+        None => PathBuf::from(raw),
+    };
+    let dir = fs::canonicalize(&path)
+        .map_err(|e| RemoteError::Invalid(format!("catalog folder {}: {e}", path.display())))?;
+    if dir.is_dir() {
+        Ok(dir)
+    } else {
+        Err(RemoteError::Invalid(format!("{} is not a folder", dir.display())))
+    }
+}
+
 impl Source {
+    /// `url` is an `https://` URL (GitHub repository or archive) or a folder on this machine,
+    /// which is stored as an absolute path and read in place on every run.
     pub fn new(name: &str, url: &str, sha256: Option<&str>) -> Result<Self, RemoteError> {
         validate_name(name)?;
-        validate_url(url)?;
+        let url = if is_local_location(url) {
+            if sha256.is_some() {
+                return Err(RemoteError::Invalid(
+                    "a local catalog folder has no archive to pin; drop --sha256".into(),
+                ));
+            }
+            resolve_local(url)?.to_string_lossy().into_owned()
+        } else {
+            validate_url(url)?;
+            url.to_string()
+        };
         if let Some(h) = sha256 {
             validate_sha256(h)?;
         }
         Ok(Self {
             name: name.into(),
-            url: url.into(),
+            url,
             sha256: sha256.map(str::to_string),
             enabled: true,
         })
+    }
+
+    /// The folder of a local source (`None` for a downloaded one).
+    pub fn local_dir(&self) -> Option<&Path> {
+        self.url.starts_with('/').then(|| Path::new(&self.url))
     }
 }
 
@@ -238,6 +284,12 @@ pub struct Fetched {
 /// `<data>/catalogs/<name>`. The new catalog has to load; if anything fails the old one stays.
 pub fn fetch(http: &dyn Http, source: &Source, data_dir: &Path) -> Result<Fetched, RemoteError> {
     validate_name(&source.name)?;
+    if source.local_dir().is_some() {
+        return Err(RemoteError::Invalid(format!(
+            "catalog {:?} is a local folder; there is nothing to fetch",
+            source.name
+        )));
+    }
     validate_url(&source.url)?;
     let url = archive_url(&source.url);
     let expected = match &source.sha256 {

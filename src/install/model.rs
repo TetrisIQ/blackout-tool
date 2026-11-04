@@ -125,7 +125,6 @@ impl Installer for ModelInstaller {
                 files: vec![],
                 service: None,
                 app: None,
-                map: None,
                 model: Some(ModelRecord {
                     name: name.clone(),
                     size: input.size,
@@ -246,7 +245,6 @@ mod tests {
             content: None,
             flatpak: None,
             group: None,
-            map: None,
             collection: None,
             ollama: Some(OllamaRef {
                 model: "granite4.2".into(),

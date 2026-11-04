@@ -9,7 +9,6 @@ pub mod cli_catalog;
 pub mod cli_net;
 pub mod datadir;
 pub mod diskspace;
-pub mod geocode;
 pub mod hw;
 pub mod plan;
 

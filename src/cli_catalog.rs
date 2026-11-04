@@ -31,11 +31,13 @@ pub enum CatalogAction {
         #[arg(long, env = "KIT_DATA_DIR")]
         data_dir: Option<PathBuf>,
     },
-    /// Add a catalog: a GitHub repository URL (its latest release is used), or the URL of a
-    /// `catalog.tar.gz` (its `.sha256` file sits next to it)
+    /// Add a catalog: a GitHub repository URL (its latest release is used), the URL of a
+    /// `catalog.tar.gz` (its `.sha256` file sits next to it), or a folder on this machine
+    /// (read in place on every run, so edits show up at once)
     Add {
         /// Short name (`[a-z0-9][a-z0-9_-]*`)
         name: String,
+        /// URL or folder, e.g. `/home/me/blackout-tool/katalog` or `~/katalog`
         url: String,
         /// Pin the archive's SHA-256 instead of reading `<url>.sha256` (updates then need a new pin)
         #[arg(long)]
@@ -128,7 +130,11 @@ pub fn load_sources(
     }
     let mut dirs = Vec::new();
     for s in sources_or_default(saved)?.into_iter().filter(|s| s.enabled) {
-        let dir = match remote::fetched_dir(data, &s.name) {
+        let dir = match s
+            .local_dir()
+            .map(Path::to_path_buf)
+            .or_else(|| remote::fetched_dir(data, &s.name))
+        {
             Some(d) => d,
             None if offline => bail!(
                 "catalog {:?} is not downloaded yet; run `kit catalog update` while online",
@@ -176,7 +182,10 @@ fn rows(env: &Env, data: &Path) -> Result<Vec<Row>> {
     Ok(sources
         .into_iter()
         .map(|s| {
-            let dir = remote::fetched_dir(data, &s.name);
+            let dir = s
+                .local_dir()
+                .map(Path::to_path_buf)
+                .or_else(|| remote::fetched_dir(data, &s.name));
             let loaded = dir.as_deref().map(Catalog::load);
             Row {
                 pinned: s.sha256.is_some(),
@@ -245,7 +254,7 @@ pub fn catalog_cmd(args: &CatalogArgs, env: &Env, offline: bool, out: &mut dyn W
             first,
             data_dir: d,
         } => {
-            if offline {
+            if offline && !remote::is_local_location(url) {
                 bail!("cannot add a catalog in offline mode");
             }
             let source = Source::new(name, url, sha256.as_deref())?;
@@ -257,14 +266,25 @@ pub fn catalog_cmd(args: &CatalogArgs, env: &Env, offline: bool, out: &mut dyn W
             if list.iter().any(|s| s.name == *name) {
                 bail!("a catalog named {name:?} exists already; remove it first");
             }
-            let fetched = remote::fetch(env.probe, &source, &data_dir(env, d)?)?;
+            let note = match source.local_dir() {
+                Some(dir) => {
+                    // Nothing is downloaded; the folder has to load as a catalog right now.
+                    remote::read_meta(dir)?;
+                    let n = Catalog::load(dir)?.packages().count();
+                    format!("local folder {}, {n} packages", dir.display())
+                }
+                None => format!(
+                    "archive {}",
+                    &remote::fetch(env.probe, &source, &data_dir(env, d)?)?.sha256[..12]
+                ),
+            };
             if *first {
                 list.insert(0, source);
             } else {
                 list.push(source);
             }
             remote::save(&env.config_dir, &list)?;
-            writeln!(out, "added {name:?} (archive {})", &fetched.sha256[..12])?;
+            writeln!(out, "added {name:?} ({note})")?;
             Ok(Outcome::Ok)
         }
         CatalogAction::Remove { name, data_dir: d } => {
@@ -297,6 +317,10 @@ pub fn catalog_cmd(args: &CatalogArgs, env: &Env, offline: bool, out: &mut dyn W
             }
             let mut failed = 0;
             for s in &sources {
+                if s.local_dir().is_some() {
+                    writeln!(out, "{}: local folder, read in place", s.name)?;
+                    continue;
+                }
                 match remote::fetch(env.probe, s, &data) {
                     Ok(f) if f.unchanged => writeln!(out, "{}: up to date ({})", s.name, &f.sha256[..12])?,
                     Ok(f) => writeln!(out, "{}: updated to {}", s.name, &f.sha256[..12])?,

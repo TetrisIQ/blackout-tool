@@ -5,7 +5,6 @@
 pub mod collection;
 pub mod container;
 pub mod flatpak;
-pub mod map;
 pub mod media;
 pub mod model;
 pub mod portal;
@@ -111,10 +110,6 @@ impl Paths {
     pub fn translate_dir(&self) -> PathBuf {
         self.data_dir.join("translate")
     }
-    /// Map regions (`<id>.pmtiles`); the portal links them next to the viewer.
-    pub fn maps_dir(&self) -> PathBuf {
-        self.data_dir.join("maps")
-    }
     pub fn quadlet_file(&self, id: &str) -> PathBuf {
         self.quadlet_dir.join(format!("kit-{id}.container"))
     }
@@ -187,8 +182,6 @@ pub struct InstallInput {
     pub group: Option<String>,
     /// `collection` packages: the site to fetch book by book.
     pub collection: Option<crate::catalog::manifest::CollectionRef>,
-    /// `map` packages: the region to cut out.
-    pub map: Option<crate::catalog::manifest::MapRef>,
     /// `model` packages: the Ollama model and the size the registry reported.
     pub ollama: Option<crate::catalog::manifest::OllamaRef>,
     /// `translation` packages: the language pair.
@@ -234,7 +227,6 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Container => Ok(Box::new(container::ContainerInstaller)),
         PackageType::Files => Ok(Box::new(media::MediaInstaller)),
         PackageType::Flatpak => Ok(Box::new(flatpak::FlatpakInstaller)),
-        PackageType::Map => Ok(Box::new(map::MapInstaller)),
         PackageType::Collection => Ok(Box::new(collection::CollectionInstaller)),
         PackageType::Model => Ok(Box::new(model::ModelInstaller)),
         PackageType::Translation => Ok(Box::new(translation::TranslationInstaller)),

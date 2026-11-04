@@ -53,10 +53,6 @@ pub fn require(name: &str, dirs: &[PathBuf]) -> Result<PathBuf, InstallError> {
             "Install Ollama from your distribution or from https://ollama.com/download and start it \
              (`ollama serve`)."
                 .to_string()
-        } else if name == "pmtiles" {
-            "Get the go-pmtiles release for your system from \
-             https://github.com/protomaps/go-pmtiles/releases and put `pmtiles` on PATH."
-                .to_string()
         } else {
             "It must be available on PATH.".to_string()
         };

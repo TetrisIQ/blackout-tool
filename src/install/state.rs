@@ -54,15 +54,6 @@ pub struct AppRecord {
     pub by_kit: bool,
 }
 
-/// The region of an installed map; the viewer starts there.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MapRecord {
-    /// West, south, east, north.
-    pub bbox: [f64; 4],
-    pub maxzoom: u8,
-}
-
 /// A language model held by Ollama.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,8 +86,6 @@ pub struct Record {
     pub service: Option<ServiceRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<AppRecord>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub map: Option<MapRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelRecord>,
 }
@@ -149,14 +138,6 @@ impl State {
         self.packages
             .values()
             .filter_map(|r| r.model.as_ref().map(|m| (r, m)))
-            .collect()
-    }
-
-    /// Installed map regions, in a stable order.
-    pub fn maps(&self) -> Vec<(&Record, &MapRecord)> {
-        self.packages
-            .values()
-            .filter_map(|r| r.map.as_ref().map(|m| (r, m)))
             .collect()
     }
 
@@ -274,7 +255,6 @@ pub(crate) fn sample_record(id: &str, file: &str, size: u64) -> Record {
         }],
         service: None,
         app: None,
-        map: None,
         model: None,
     }
 }

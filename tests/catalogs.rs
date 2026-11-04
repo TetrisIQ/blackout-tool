@@ -216,3 +216,52 @@ fn check_validates_a_catalog_directory() {
         Some(1)
     );
 }
+
+#[test]
+fn a_local_folder_is_added_read_in_place_and_removed_without_touching_it() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("games")).unwrap();
+    std::fs::write(d.path().join("games/one.yaml"), files_yaml("one", "One", "")).unwrap();
+    let dir = d.path().to_str().unwrap();
+    let home = Home::new();
+
+    let o = home.kit(&["catalog", "add", "dev", dir]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains("local folder") && text(&o.stdout).contains("1 packages"));
+    let list = text(&home.kit(&["catalog", "list"]).stdout);
+    assert!(
+        list.contains("dev") && list.contains("ok") && list.contains(dir),
+        "{list}"
+    );
+
+    // Edits show up without any update, and `update` has nothing to fetch.
+    std::fs::write(d.path().join("games/two.yaml"), files_yaml("two", "Two", "one")).unwrap();
+    let o = home.kit(&["catalog", "update", "dev"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(text(&o.stdout).contains("read in place"));
+    let json = text(&home.kit(&["catalog", "list", "--json"]).stdout);
+    assert!(json.contains("\"packages\": 2"), "{json}");
+    assert!(!home.data.path().join("catalogs/dev").exists());
+
+    // Not a folder, a pin, and a broken catalog are refused and nothing is saved.
+    let o = home.kit(&["catalog", "add", "gone", "/nonexistent/katalog"]);
+    assert_eq!(o.status.code(), Some(1));
+    let o = home.kit(&["catalog", "add", "pinned", dir, "--sha256", &"a".repeat(64)]);
+    assert!(text(&o.stderr).contains("--sha256"), "{}", text(&o.stderr));
+    std::fs::write(d.path().join("games/bad.yaml"), "id: bad\n").unwrap();
+    assert_eq!(
+        home.kit(&["catalog", "add", "broken", dir]).status.code(),
+        Some(1)
+    );
+    let list = text(&home.kit(&["catalog", "list"]).stdout);
+    assert!(
+        !list.contains("gone") && !list.contains("pinned") && !list.contains("broken"),
+        "{list}"
+    );
+
+    // Removing the entry never deletes the folder.
+    std::fs::remove_file(d.path().join("games/bad.yaml")).unwrap();
+    let o = home.kit(&["catalog", "remove", "dev"]);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o.stderr));
+    assert!(d.path().join("games/one.yaml").exists());
+}

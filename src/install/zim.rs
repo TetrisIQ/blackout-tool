@@ -146,7 +146,6 @@ impl Installer for ZimInstaller {
                 }],
                 service: None,
                 app: None,
-                map: None,
                 model: None,
             },
         );
@@ -293,7 +292,6 @@ mod tests {
                 content: None,
                 flatpak: None,
                 group: None,
-                map: None,
                 collection: None,
                 ollama: None,
                 translation: None,

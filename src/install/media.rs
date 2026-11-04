@@ -189,7 +189,6 @@ impl Installer for MediaInstaller {
                 }],
                 service: None,
                 app: None,
-                map: None,
                 model: None,
             },
         );
@@ -336,7 +335,6 @@ mod tests {
                 }),
                 flatpak: None,
                 group: None,
-                map: None,
                 collection: None,
                 ollama: None,
                 translation: None,

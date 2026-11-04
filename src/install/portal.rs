@@ -241,7 +241,7 @@ fn launcher_tiles(state: &State, origin: Origin) -> String {
             &href,
         ));
     }
-    if matches!(origin, Origin::Front { .. }) && !state.maps().is_empty() {
+    if matches!(origin, Origin::Front { .. }) && !map_books(state).is_empty() {
         tiles.push_str(&tile(icon::MAP, "Maps", "/read.html#/maps/"));
     }
     if !state.games().is_empty() {
@@ -433,82 +433,63 @@ fn survival_books(state: &State) -> Vec<String> {
 }
 
 const VIEWER: &str = include_str!("../../assets/maps/viewer.html");
-const VENDOR: [(&str, &str); 3] = [
+const VENDOR: [(&str, &str); 4] = [
     ("leaflet.js", include_str!("../../assets/maps/leaflet.js")),
     ("leaflet.css", include_str!("../../assets/maps/leaflet.css")),
+    ("maplibre-gl.js", include_str!("../../assets/maps/maplibre-gl.js")),
     (
-        "protomaps-leaflet.js",
-        include_str!("../../assets/maps/protomaps-leaflet.js"),
+        "maplibre-gl.css",
+        include_str!("../../assets/maps/maplibre-gl.css"),
     ),
 ];
+const VENDOR_BRIDGE: (&str, &str) = (
+    "leaflet-maplibre-gl.js",
+    include_str!("../../assets/maps/leaflet-maplibre-gl.js"),
+);
 
-/// `regions.json` for the viewer: name, file URL and bounds of every installed map.
-fn render_regions(paths: &Paths, state: &State) -> String {
-    let regions: Vec<_> = state
-        .maps()
-        .into_iter()
-        .filter_map(|(r, m)| {
-            let f = r.files.first()?;
-            let places = super::map::places_name(&r.id);
-            let places = paths
-                .maps_dir()
-                .join(&places)
-                .exists()
-                .then(|| format!("/maps/data/{places}"));
-            Some(serde_json::json!({
-                "id": r.id,
-                "name": r.name,
-                "file": format!("/maps/data/{}", f.name),
-                "places": places,
-                "bbox": m.bbox,
-                "maxzoom": m.maxzoom,
-            }))
+/// Installed map books: `zim` packages of the category `maps` (Kiwix's `maps_en_<country>`), as
+/// `(id, name, book)`. The book is the file name without `.zim`, as in `/content/<book>/`.
+fn map_books(state: &State) -> Vec<(String, String, String)> {
+    let mut books: Vec<_> = state
+        .packages
+        .values()
+        .filter(|r| r.kind == PackageType::Zim && r.category.as_deref() == Some("maps"))
+        .filter_map(|r| {
+            let book = r.files.first()?.name.strip_suffix(".zim")?.to_string();
+            Some((r.id.clone(), r.name.clone(), book))
         })
+        .collect();
+    books.sort();
+    books
+}
+
+/// `regions.json` for the viewer: the installed map books. Tiles, style, fonts and the bounds
+/// all come from the book itself, served by the content server under `/content/<book>/`.
+fn render_regions(state: &State) -> String {
+    let regions: Vec<_> = map_books(state)
+        .into_iter()
+        .map(|(id, name, book)| serde_json::json!({ "id": id, "name": name, "book": book }))
         .collect();
     serde_json::to_string_pretty(&regions).unwrap_or_else(|_| "[]".into())
 }
 
-/// The map viewer under `<portal>/maps/`: the page, the vendored scripts, `regions.json` and one
-/// symlink per region into `<data-dir>/maps/` (the front serves them with range requests).
-fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
+/// The map viewer under `<portal>/maps/`: the page, the vendored scripts and `regions.json`.
+fn write_maps(state: &State, dir: &Path) -> Result<(), super::InstallError> {
     let maps = dir.join("maps");
-    if state.maps().is_empty() {
+    if map_books(state).is_empty() {
         return match fs::remove_dir_all(&maps) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(io_err("cannot remove", &maps)(e)),
         };
     }
-    let (vendor, data) = (maps.join("vendor"), maps.join("data"));
-    for d in [&vendor, &data] {
-        fs::create_dir_all(d).map_err(io_err("cannot create", d))?;
-    }
+    let vendor = maps.join("vendor");
+    fs::create_dir_all(&vendor).map_err(io_err("cannot create", &vendor))?;
     write_atomic(&maps.join("index.html"), VIEWER)?;
-    for (name, text) in VENDOR {
+    for (name, text) in VENDOR.iter().chain(std::iter::once(&VENDOR_BRIDGE)) {
         write_atomic(&vendor.join(name), text)?;
     }
-    write_atomic(&maps.join("regions.json"), &render_regions(paths, state))?;
-    // Rebuild the links: drop stale ones, then point each installed file at the data directory.
-    for entry in fs::read_dir(&data)
-        .map_err(io_err("cannot read", &data))?
-        .flatten()
-    {
-        let _ = fs::remove_file(entry.path());
-    }
-    for (r, _) in state.maps() {
-        for f in &r.files {
-            let link = data.join(&f.name);
-            std::os::unix::fs::symlink(paths.maps_dir().join(&f.name), &link)
-                .map_err(io_err("cannot link", &link))?;
-        }
-        let places = super::map::places_name(&r.id);
-        if paths.maps_dir().join(&places).exists() {
-            let link = data.join(&places);
-            std::os::unix::fs::symlink(paths.maps_dir().join(&places), &link)
-                .map_err(io_err("cannot link", &link))?;
-        }
-    }
-    Ok(())
+    write_atomic(&maps.join("regions.json"), &render_regions(state))
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), super::InstallError> {
@@ -546,7 +527,7 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     write_atomic(&dir.join("installed.json"), &render_json(state))?;
     write_assistant(state, &dir)?;
     write_translate(paths, &dir)?;
-    write_maps(paths, state, &dir)?;
+    write_maps(state, &dir)?;
     write_games(paths, state, &dir)
 }
 
@@ -871,28 +852,33 @@ mod tests {
     #[test]
     fn maps_are_in_the_launcher_on_the_front_only_and_described_for_the_viewer() {
         let mut st = State::default();
-        let mut r = sample_record("map_x", "map_x.pmtiles", 1_000_000);
+        let mut r = sample_record("maps_en_x", "maps_en_x_2026-06.zim", 1_000_000);
         r.name = "Map X".into();
-        r.kind = crate::catalog::PackageType::Map;
-        r.map = Some(super::super::state::MapRecord {
-            bbox: [1.0, 2.0, 3.0, 4.0],
-            maxzoom: 12,
-        });
-        st.packages.insert("map_x".into(), r);
+        r.kind = crate::catalog::PackageType::Zim;
+        r.category = Some("maps".into());
+        st.packages.insert("maps_en_x".into(), r);
         let front = render_page(&st, Origin::Front { host: "kit.local" });
         assert!(front.contains("href=\"/read.html#/maps/\""), "{front}");
         assert!(!render_index(&st).contains("href=\"/maps/\""));
+        let regions = render_regions(&st);
+        assert!(regions.contains("\"book\": \"maps_en_x_2026-06\""), "{regions}");
+        assert!(regions.contains("\"name\": \"Map X\""), "{regions}");
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
-        let regions = render_regions(&paths, &st);
-        assert!(regions.contains("/maps/data/map_x.pmtiles") && regions.contains("\"maxzoom\": 12"));
-        assert!(regions.contains("\"places\": null"), "{regions}");
-        // With a place index next to the map, the viewer is told where it is and it is linked.
-        fs::create_dir_all(paths.maps_dir()).unwrap();
-        fs::write(paths.maps_dir().join("map_x.places.json"), "[]").unwrap();
-        assert!(render_regions(&paths, &st).contains("/maps/data/map_x.places.json"));
-        write_maps(&paths, &st, dir.path()).unwrap();
-        assert!(dir.path().join("maps/data/map_x.places.json").exists());
+        write_maps(&st, dir.path()).unwrap();
+        let maps = dir.path().join("maps");
+        for f in [
+            "index.html",
+            "regions.json",
+            "vendor/leaflet.js",
+            "vendor/maplibre-gl.js",
+            "vendor/leaflet-maplibre-gl.js",
+        ] {
+            assert!(maps.join(f).exists(), "{f}");
+        }
+        // Without a map book the viewer is removed again; other ZIMs are not maps.
+        st.packages.get_mut("maps_en_x").unwrap().category = Some("survival".into());
+        write_maps(&st, dir.path()).unwrap();
+        assert!(!maps.exists());
     }
 
     #[test]

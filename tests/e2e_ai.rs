@@ -121,7 +121,6 @@ fn the_front_serves_the_assistant_and_limits_the_ollama_api() {
             files: vec![],
             service: None,
             app: None,
-            map: None,
             model: Some(ModelRecord {
                 name: model.clone(),
                 size: 1,

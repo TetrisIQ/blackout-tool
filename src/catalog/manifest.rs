@@ -10,8 +10,6 @@ pub enum PackageType {
     Container,
     /// A local program installed per user from Flathub (Phase 6b: games).
     Flatpak,
-    /// A region cut out of a Protomaps planet build with `pmtiles extract` (Phase 7: maps).
-    Map,
     /// Many small files fetched one by one from a public site (ebooks); kit records each
     /// file's checksum when it is first downloaded.
     Collection,
@@ -28,7 +26,6 @@ impl PackageType {
             Self::Files => "files",
             Self::Container => "container",
             Self::Flatpak => "flatpak",
-            Self::Map => "map",
             Self::Collection => "collection",
             Self::Apt => "apt",
             Self::Model => "model",
@@ -93,33 +90,6 @@ pub struct ModelSpec {
 /// Models with a smaller window cannot hold a few library passages plus a question.
 pub const MIN_CONTEXT_K: u32 = 32;
 
-/// A map region: a bounding box cut out of the newest Protomaps build.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct MapRef {
-    /// West, south, east, north in degrees (as `pmtiles extract --bbox`).
-    pub bbox: [f64; 4],
-    /// Highest zoom level kept; 15 is street level, each level fewer is roughly a quarter of the size.
-    pub maxzoom: u8,
-}
-
-impl MapRef {
-    fn problems(&self) -> Vec<String> {
-        let [w, s, e, n] = self.bbox;
-        let mut errs = Vec::new();
-        if !(-180.0..=180.0).contains(&w) || !(-180.0..=180.0).contains(&e) || w >= e {
-            errs.push("source.map.bbox needs west < east, both within -180..180".into());
-        }
-        if !(-90.0..=90.0).contains(&s) || !(-90.0..=90.0).contains(&n) || s >= n {
-            errs.push("source.map.bbox needs south < north, both within -90..90".into());
-        }
-        if !(1..=15).contains(&self.maxzoom) {
-            errs.push("source.map.maxzoom must be between 1 and 15".into());
-        }
-        errs
-    }
-}
-
 /// A language pair of a `translation` package: ISO 639-1 codes as Mozilla names them (`en`, `de`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -179,9 +149,6 @@ pub struct Source {
     /// Model of a `model` package (Ollama registry, `library/` namespace).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ollama: Option<OllamaRef>,
-    /// Region of a `map` package.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub map: Option<MapRef>,
     /// Language pair of a `translation` package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub translation: Option<TranslationRef>,
@@ -575,10 +542,6 @@ impl Manifest {
                     None => errs.push("type flatpak needs source.flatpak".into()),
                 },
                 PackageType::Model | PackageType::Translation => unreachable!("handled above"),
-                PackageType::Map => match &s.map {
-                    Some(m) => errs.extend(m.problems()),
-                    None => errs.push("type map needs source.map (bbox and maxzoom)".into()),
-                },
                 PackageType::Collection => {
                     if s.collection.is_none() {
                         errs.push("type collection needs source.collection (provider)".into());
@@ -613,20 +576,9 @@ impl Manifest {
                         .into(),
                 );
             }
-            if self.kind == PackageType::Map && (s.url.is_some() || self.sha256.is_some()) {
-                errs.push(
-                    "type map takes no url or sha256 (the region is cut from the newest Protomaps build; \
-                     kit records the checksum of the result)"
-                        .into(),
-                );
-            }
             if matches!(
                 self.kind,
-                PackageType::Container
-                    | PackageType::Flatpak
-                    | PackageType::Map
-                    | PackageType::Collection
-                    | PackageType::Apt
+                PackageType::Container | PackageType::Flatpak | PackageType::Collection | PackageType::Apt
             ) && self.size_bytes.is_none()
             {
                 errs.push(format!(
@@ -644,9 +596,6 @@ impl Manifest {
         }
         if s.collection.is_some() && self.kind != PackageType::Collection {
             errs.push("source.collection is only valid for type collection".into());
-        }
-        if s.map.is_some() && self.kind != PackageType::Map {
-            errs.push("source.map is only valid for type map".into());
         }
         if s.flatpak.is_some() && self.kind != PackageType::Flatpak {
             errs.push("source.flatpak is only valid for type flatpak".into());
@@ -955,20 +904,6 @@ license: {spdx: GPL-2.0-only}
         assert!(parse(&y).unwrap().validate().len() >= 2);
     }
 
-    fn map(extra: &str) -> String {
-        format!(
-            "
-id: map_x
-name: Map X
-description: d
-category: maps
-type: map
-size_bytes: 1000
-license: {{spdx: ODbL-1.0}}
-{extra}"
-        )
-    }
-
     #[test]
     fn collection_manifest_rules() {
         let yaml = |extra: &str| {
@@ -1003,61 +938,6 @@ license: {{spdx: ODbL-1.0}}
         let mut misplaced = parse(KIWIX).unwrap();
         misplaced.source.collection = ok.source.collection;
         assert!(errs(&misplaced).contains("only valid for type collection"));
-    }
-
-    #[test]
-    fn map_manifest_rules() {
-        let ok = parse(&map(
-            "source: {map: {bbox: [5.8, 47.2, 15.0, 55.1], maxzoom: 13}}",
-        ))
-        .unwrap();
-        assert!(ok.validate().is_empty(), "{:?}", ok.validate());
-
-        let no_region = parse(&map("source: {}")).unwrap();
-        assert!(
-            no_region
-                .validate()
-                .iter()
-                .any(|e| e.contains("needs source.map"))
-        );
-
-        let swapped = parse(&map(
-            "source: {map: {bbox: [15.0, 55.1, 5.8, 47.2], maxzoom: 13}}",
-        ))
-        .unwrap();
-        let errs = swapped.validate().join("; ");
-        assert!(
-            errs.contains("west < east") && errs.contains("south < north"),
-            "{errs}"
-        );
-
-        let deep = parse(&map(
-            "source: {map: {bbox: [5.8, 47.2, 15.0, 55.1], maxzoom: 20}}",
-        ))
-        .unwrap();
-        assert!(deep.validate().iter().any(|e| e.contains("maxzoom")));
-
-        let with_url = parse(&map(&format!(
-            "source: {{url: 'https://example.org/x.pmtiles', map: {{bbox: [5.8, 47.2, 15.0, 55.1], maxzoom: 9}}}}\nsha256: {SHA}"
-        )))
-        .unwrap();
-        assert!(
-            with_url
-                .validate()
-                .iter()
-                .any(|e| e.contains("type map takes no url or sha256"))
-        );
-
-        let on_zim = parse(KIWIX).unwrap();
-        assert!(on_zim.validate().is_empty());
-        let mut misplaced = on_zim;
-        misplaced.source.map = ok.source.map.clone();
-        assert!(
-            misplaced
-                .validate()
-                .iter()
-                .any(|e| e.contains("only valid for type map"))
-        );
     }
 
     #[test]

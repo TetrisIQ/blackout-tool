@@ -173,7 +173,6 @@ pub fn archive(spec: &ArchiveSpec, ctx: &Ctx, state: &mut StateGuard) -> Result<
         content: None,
         flatpak: None,
         group: None,
-        map: None,
         collection: None,
         ollama: None,
         translation: None,

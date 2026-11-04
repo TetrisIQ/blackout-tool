@@ -244,7 +244,6 @@ impl CollectionInstaller {
                 files,
                 service: None,
                 app: None,
-                map: None,
                 model: None,
             },
         );
@@ -514,7 +513,6 @@ mod tests {
             collection: Some(CollectionRef {
                 provider: Provider::StandardEbooks,
             }),
-            map: None,
             ollama: None,
             translation: None,
             model_spec: None,

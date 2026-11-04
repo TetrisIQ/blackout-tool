@@ -1,0 +1,12 @@
+id: maps_en_luxembourg
+name: Map of Luxembourg
+description: "Street map of Luxembourg from OpenStreetMap as vector tiles (roads, paths, buildings, places and points of interest such as drinking water, shelters, hospitals) with the Kiwix map viewer data. Zoom 0-14."
+category: maps
+type: zim
+source:
+  kiwix: {name: maps_en_luxembourg}
+license:
+  spdx: ODbL-1.0
+  url: https://www.openstreetmap.org/copyright
+  attribution: OpenStreetMap contributors; OpenFreeMap; OpenMapTiles
+languages: [en]
