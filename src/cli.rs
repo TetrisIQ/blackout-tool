@@ -629,6 +629,13 @@ fn show(catalog: &Catalog, id: &str, json: bool, http: &dyn Http, out: &mut dyn 
     if let Some(o) = &m.source.ollama {
         writeln!(out, "  model:      {} (Ollama registry)", o.name())?;
     }
+    if let Some(t) = &m.source.translation {
+        writeln!(
+            out,
+            "  languages:  {} -> {} (Mozilla Bergamot models)",
+            t.from, t.to
+        )?;
+    }
     if let Some(r) = &m.source.map {
         writeln!(
             out,
@@ -1051,6 +1058,14 @@ fn is_current(state: &State, item: &plan::PlanItem, catalog: &Catalog, paths: &i
     if item.kind == crate::catalog::PackageType::Model {
         return r.model.is_some();
     }
+    if item.kind == crate::catalog::PackageType::Translation {
+        // Newer models of Mozilla are an update (Phase 10); a complete folder is current.
+        return catalog
+            .package(&item.id)
+            .ok()
+            .and_then(|m| m.source.translation.as_ref())
+            .is_some_and(|t| install::translation::is_complete(&paths.translate_dir().join(t.pair())));
+    }
     if item.kind == crate::catalog::PackageType::Collection {
         // The record is written once every book is there. New books of the site are not
         // fetched by a plain re-run; that is an update (Phase 10).
@@ -1102,6 +1117,7 @@ fn install_input(
         map: manifest.source.map.clone(),
         collection: manifest.source.collection,
         ollama: manifest.source.ollama.clone(),
+        translation: manifest.source.translation.clone(),
         model_spec: manifest.model.clone(),
         category: Some(manifest.category.clone()),
     }

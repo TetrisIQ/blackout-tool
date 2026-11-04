@@ -19,7 +19,8 @@ pub const STAMP_FILE: &str = ".kit-sha256";
 
 /// Name and location of the catalog used when none was added.
 pub const DEFAULT_NAME: &str = "main";
-pub const DEFAULT_URL: &str = "https://github.com/TetrisIQ/blackout-tool-catalog/releases/latest/download/catalog.tar.gz";
+pub const DEFAULT_URL: &str =
+    "https://github.com/TetrisIQ/blackout-tool-catalog/releases/latest/download/catalog.tar.gz";
 
 /// Upper bound for what an archive may unpack to.
 const MAX_UNPACKED: u64 = 200_000_000;

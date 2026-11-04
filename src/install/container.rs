@@ -806,6 +806,7 @@ mod tests {
                 map: None,
                 collection: None,
                 ollama: None,
+                translation: None,
                 model_spec: None,
                 category: None,
             }

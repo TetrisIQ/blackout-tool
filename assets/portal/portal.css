@@ -125,3 +125,6 @@ dialog.providers .sum { margin-right: auto; font-size: 13px; color: var(--color-
 .themebtn .to-light, :root[data-theme=dark] .themebtn .to-dark { display: none; }
 :root[data-theme=dark] .themebtn .to-light { display: block; }
 .search label svg, .pill svg { color: var(--color-neutral-600); }
+.tbtn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--color-divider); border-radius: 999px; background: none; font: inherit; font-size: 12px; color: var(--color-neutral-700); cursor: pointer; }
+.tbtn:hover, .tbtn.on { color: var(--color-accent-700); }
+.tbtn[hidden] { display: none; }

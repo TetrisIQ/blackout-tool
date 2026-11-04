@@ -253,6 +253,7 @@ mod tests {
                 tag: "3b".into(),
             }),
             category: None,
+            translation: None,
             model_spec: Some(crate::catalog::manifest::ModelSpec {
                 thinking: true,
                 context_k: 128,

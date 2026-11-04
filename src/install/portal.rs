@@ -61,6 +61,22 @@ const RESULTS: &str = include_str!("../../assets/portal/results.html");
 const THEME_JS: &str = include_str!("../../assets/portal/theme.js");
 const CSS: &str = include_str!("../../assets/portal/portal.css");
 const COMMON_JS: &str = include_str!("../../assets/portal/common.js");
+/// The translation engine, served from `/translate/engine/` (see `assets/translate/NOTICE.md`).
+const ENGINE: [(&str, &[u8]); 3] = [
+    (
+        "translator-worker.js",
+        include_bytes!("../../assets/translate/translator-worker.js"),
+    ),
+    (
+        "bergamot-translator-worker.js",
+        include_bytes!("../../assets/translate/bergamot-translator-worker.js"),
+    ),
+    (
+        "bergamot-translator-worker.wasm",
+        include_bytes!("../../assets/translate/bergamot-translator-worker.wasm"),
+    ),
+];
+const TRANSLATE_JS: &str = include_str!("../../assets/portal/translate.js");
 
 /// Font Awesome Free 6.7.2 solid icons (https://fontawesome.com, icons CC BY 4.0), inlined so the page
 /// works offline: (viewBox, path elements). See `assets/portal/ICONS.md`.
@@ -239,7 +255,7 @@ fn base_of(origin: Origin) -> String {
 
 /// `read.html`: the Blackout header above an article, which is shown in a frame. The front links
 /// every article through it (`/read.html#/content/<book>/<path>`), so the way back is always there.
-pub fn render_read(state: &State) -> String {
+pub fn render_read(state: &State, pairs: &[String]) -> String {
     let tiles = launcher_tiles(state, Origin::Front { host: PORTAL_HOST });
     fill(
         READ,
@@ -249,8 +265,32 @@ pub fn render_read(state: &State) -> String {
             ("COMMON_JS", COMMON_JS),
             ("LAUNCHER", &tiles),
             ("LAUNCHER_HIDDEN", if tiles.is_empty() { " hidden" } else { "" }),
+            ("TRANSLATE_JS", TRANSLATE_JS),
+            ("TRANSLATE_PAIRS", &serde_json::json!(pairs).to_string()),
+            ("TRANSLATE_HIDDEN", if pairs.is_empty() { " hidden" } else { "" }),
         ],
     )
+}
+
+/// Language pairs (`de-en`) with an installed translation model: a complete folder under
+/// `<data>/translate/` (model, lexicon, vocabulary).
+pub fn translate_pairs(paths: &Paths) -> Vec<String> {
+    let mut pairs: Vec<String> = fs::read_dir(paths.translate_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| super::translation::is_complete(&e.path()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| {
+            n.split_once('-').is_some_and(|(a, b)| {
+                [a, b]
+                    .iter()
+                    .all(|c| (2..=3).contains(&c.len()) && c.bytes().all(|x| x.is_ascii_lowercase()))
+            })
+        })
+        .collect();
+    pairs.sort();
+    pairs
 }
 
 /// `results.html`: the search results in the portal's look, filled in by the browser from the
@@ -461,6 +501,10 @@ fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::Ins
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), super::InstallError> {
+    write_atomic_bytes(path, content.as_bytes())
+}
+
+fn write_atomic_bytes(path: &Path, content: &[u8]) -> Result<(), super::InstallError> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, content)
         .and_then(|()| fs::rename(&tmp, path))
@@ -480,14 +524,45 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     fs::create_dir_all(&dir).map_err(io_err("cannot create", &dir))?;
     write_atomic(&dir.join("index.html"), &render_index(state))?;
     write_atomic(&dir.join("results.html"), &render_results(state))?;
-    write_atomic(&dir.join("read.html"), &render_read(state))?;
+    write_atomic(
+        &dir.join("read.html"),
+        &render_read(state, &translate_pairs(paths)),
+    )?;
     write_atomic(
         &dir.join(FRONT_PAGE),
         &render_page(state, Origin::Front { host: PORTAL_HOST }),
     )?;
     write_atomic(&dir.join("installed.json"), &render_json(state))?;
     write_assistant(state, &dir)?;
+    write_translate(paths, &dir)?;
     write_maps(paths, state, &dir)
+}
+
+/// `<portal>/translate/<pair>` links to the model folders in the data directory, so the front can
+/// serve them next to the vendored engine in `translate/engine/`.
+fn write_translate(paths: &Paths, dir: &Path) -> Result<(), super::InstallError> {
+    let out = dir.join("translate");
+    for entry in fs::read_dir(&out).into_iter().flatten().flatten() {
+        if entry.file_name() != "engine" {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    let pairs = translate_pairs(paths);
+    if pairs.is_empty() {
+        let _ = fs::remove_dir_all(&out);
+        return Ok(());
+    }
+    let engine = out.join("engine");
+    fs::create_dir_all(&engine).map_err(io_err("cannot create", &engine))?;
+    for (name, bytes) in ENGINE {
+        write_atomic_bytes(&engine.join(name), bytes)?;
+    }
+    for pair in pairs {
+        let link = out.join(&pair);
+        std::os::unix::fs::symlink(paths.translate_dir().join(&pair), &link)
+            .map_err(io_err("cannot link", &link))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -588,7 +663,7 @@ mod tests {
             render_index(&st),
             render_page(&st, Origin::Front { host: "kit.local" }),
             render_results(&st),
-            render_read(&st),
+            render_read(&st, &[]),
         ] {
             assert!(
                 html.contains("window.kitTheme") && html.contains("id=\"theme-toggle\""),
@@ -761,5 +836,43 @@ mod tests {
         st.packages.remove("llm");
         write(&paths, &st).unwrap();
         assert!(!ai.exists());
+    }
+}
+
+#[cfg(test)]
+mod translate_tests {
+    use super::*;
+
+    #[test]
+    fn translate_button_only_with_an_installed_pair() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
+        assert!(translate_pairs(&paths).is_empty());
+        assert!(
+            render_read(&State::default(), &[]).contains(
+                "id=\"translate-btn\" aria-label=\"Translate page\" title=\"Translate page\" hidden"
+            )
+        );
+        for (d, file) in [
+            ("en-de", "model.bin"),
+            ("fr-en", "model.bin"),
+            ("x", "model.bin"),
+            ("Bad-Dir", "model.bin"),
+        ] {
+            fs::create_dir_all(paths.translate_dir().join(d)).unwrap();
+            for f in ["lex.bin", "vocab.spm", file] {
+                fs::write(paths.translate_dir().join(d).join(f), "x").unwrap();
+            }
+        }
+        // Only a complete folder counts; a name that is no language pair never does.
+        fs::remove_file(paths.translate_dir().join("fr-en/lex.bin")).unwrap();
+        let pairs = translate_pairs(&paths);
+        assert_eq!(pairs, ["en-de"]);
+        let html = render_read(&State::default(), &pairs);
+        assert!(
+            html.contains("window.kitTranslatePairs = [\"en-de\"]")
+                && !html.contains(" hidden>\n    <svg width=\"18\"")
+        );
+        assert!(!html.contains("{{"));
     }
 }

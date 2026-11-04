@@ -17,6 +17,8 @@ pub enum PackageType {
     Collection,
     Apt,
     Model,
+    /// A language pair for page translation in the browser (models read live from Mozilla).
+    Translation,
 }
 
 impl PackageType {
@@ -30,6 +32,7 @@ impl PackageType {
             Self::Collection => "collection",
             Self::Apt => "apt",
             Self::Model => "model",
+            Self::Translation => "translation",
         }
     }
 }
@@ -117,6 +120,29 @@ impl MapRef {
     }
 }
 
+/// A language pair of a `translation` package: ISO 639-1 codes as Mozilla names them (`en`, `de`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TranslationRef {
+    pub from: String,
+    pub to: String,
+}
+
+impl TranslationRef {
+    /// Folder name under `<data>/translate/`.
+    pub fn pair(&self) -> String {
+        format!("{}-{}", self.from, self.to)
+    }
+    fn problems(&self) -> Vec<String> {
+        let ok = |c: &str| (2..=3).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_lowercase());
+        if ok(&self.from) && ok(&self.to) && self.from != self.to {
+            Vec::new()
+        } else {
+            vec!["source.translation needs two different language codes like from: en, to: de".into()]
+        }
+    }
+}
+
 /// Sites whose whole catalog `collection` packages can fetch (the file layout is in code).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -156,6 +182,9 @@ pub struct Source {
     /// Region of a `map` package.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<MapRef>,
+    /// Language pair of a `translation` package.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<TranslationRef>,
     /// Site to fetch book by book (type `collection`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collection: Option<CollectionRef>,
@@ -482,6 +511,22 @@ impl Manifest {
                     ));
                 }
             }
+        } else if self.kind == PackageType::Translation {
+            match &s.translation {
+                Some(t) => errs.extend(t.problems()),
+                None => errs.push("type translation needs source.translation (from, to)".into()),
+            }
+            for (field, present) in [
+                ("source.url", s.url.is_some()),
+                ("sha256", self.sha256.is_some()),
+                ("size_bytes", self.size_bytes.is_some()),
+            ] {
+                if present {
+                    errs.push(format!(
+                        "{field} must not be set together with source.translation (read live from Mozilla)"
+                    ));
+                }
+            }
         } else if self.kind == PackageType::Model {
             match &s.ollama {
                 Some(o) => {
@@ -529,7 +574,7 @@ impl Manifest {
                     )),
                     None => errs.push("type flatpak needs source.flatpak".into()),
                 },
-                PackageType::Model => unreachable!("handled above"),
+                PackageType::Model | PackageType::Translation => unreachable!("handled above"),
                 PackageType::Map => match &s.map {
                     Some(m) => errs.extend(m.problems()),
                     None => errs.push("type map needs source.map (bbox and maxzoom)".into()),
@@ -593,6 +638,9 @@ impl Manifest {
 
         if s.ollama.is_some() && self.kind != PackageType::Model {
             errs.push("source.ollama is only valid for type model".into());
+        }
+        if s.translation.is_some() && self.kind != PackageType::Translation {
+            errs.push("source.translation is only valid for type translation".into());
         }
         if s.collection.is_some() && self.kind != PackageType::Collection {
             errs.push("source.collection is only valid for type collection".into());

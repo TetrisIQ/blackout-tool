@@ -6,6 +6,7 @@ pub mod manifest;
 pub mod profile;
 pub mod remote;
 pub mod resolve;
+pub mod translation;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;

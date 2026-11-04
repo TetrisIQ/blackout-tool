@@ -516,6 +516,7 @@ mod tests {
             }),
             map: None,
             ollama: None,
+            translation: None,
             model_spec: None,
             category: None,
         }

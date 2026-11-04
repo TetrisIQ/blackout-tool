@@ -17,6 +17,7 @@ pub const CATEGORIES: &[(&str, &str)] = &[
     ("audiobooks", "Audiobooks"),
     ("maps", "Maps"),
     ("ai", "Local assistant"),
+    ("translation", "Page translation"),
     ("games", "Games"),
 ];
 

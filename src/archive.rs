@@ -176,6 +176,7 @@ pub fn archive(spec: &ArchiveSpec, ctx: &Ctx, state: &mut StateGuard) -> Result<
         map: None,
         collection: None,
         ollama: None,
+        translation: None,
         model_spec: None,
         category: Some("reference".into()),
     };

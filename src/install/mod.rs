@@ -15,6 +15,7 @@ pub mod runner;
 pub mod service;
 pub mod state;
 pub mod tools;
+pub mod translation;
 pub mod zim;
 
 use std::path::{Path, PathBuf};
@@ -105,6 +106,11 @@ impl Paths {
     pub fn media_dir(&self, media: &str) -> PathBuf {
         self.data_dir.join("media").join(media)
     }
+    /// Translation models, one folder per language pair (`<src>-<tgt>/`); the portal offers
+    /// page translation for the pairs found here.
+    pub fn translate_dir(&self) -> PathBuf {
+        self.data_dir.join("translate")
+    }
     /// Map regions (`<id>.pmtiles`); the portal links them next to the viewer.
     pub fn maps_dir(&self) -> PathBuf {
         self.data_dir.join("maps")
@@ -185,6 +191,8 @@ pub struct InstallInput {
     pub map: Option<crate::catalog::manifest::MapRef>,
     /// `model` packages: the Ollama model and the size the registry reported.
     pub ollama: Option<crate::catalog::manifest::OllamaRef>,
+    /// `translation` packages: the language pair.
+    pub translation: Option<crate::catalog::manifest::TranslationRef>,
     /// `model` packages: what the assistant page may ask of it (reasoning).
     pub model_spec: Option<crate::catalog::manifest::ModelSpec>,
     /// Catalog category, kept in the record so the portal can tell survival books from the rest.
@@ -229,6 +237,7 @@ pub fn installer_for(kind: PackageType) -> Result<Box<dyn Installer>, InstallErr
         PackageType::Map => Ok(Box::new(map::MapInstaller)),
         PackageType::Collection => Ok(Box::new(collection::CollectionInstaller)),
         PackageType::Model => Ok(Box::new(model::ModelInstaller)),
+        PackageType::Translation => Ok(Box::new(translation::TranslationInstaller)),
         other => Err(InstallError::Unsupported(format!(
             "packages of type {} cannot be installed yet",
             other.as_str()

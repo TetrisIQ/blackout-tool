@@ -41,6 +41,8 @@ pub enum ResolveError {
     Ollama { name: String, message: String },
     #[error(transparent)]
     Kiwix(#[from] KiwixError),
+    #[error("{name}: {message}")]
+    Translation { name: String, message: String },
     #[error("manifest declares no size")]
     NoSize,
 }
@@ -113,6 +115,22 @@ impl<H: Http + ?Sized> Resolver for LiveResolver<'_, H> {
                 url: None,
                 mirrors: Vec::new(),
                 version: Some(digest.chars().take(12).collect()),
+                live: true,
+            });
+        }
+        if let Some(t) = &m.source.translation {
+            let files = super::translation::lookup(self.http, &t.from, &t.to).map_err(|e| {
+                ResolveError::Translation {
+                    name: t.pair(),
+                    message: e.to_string(),
+                }
+            })?;
+            return Ok(Resolved {
+                size_bytes: files.size(),
+                sha256: None,
+                url: None,
+                mirrors: Vec::new(),
+                version: Some(files.version),
                 live: true,
             });
         }
