@@ -160,6 +160,15 @@ impl State {
             .collect()
     }
 
+    /// Installed browser games: `files` packages unpacked into `media/games/<id>/`.
+    pub fn games(&self) -> Vec<&Record> {
+        self.packages
+            .values()
+            .filter(|r| r.kind == PackageType::Files)
+            .filter(|r| r.files.first().is_some_and(|f| f.name.starts_with("games/")))
+            .collect()
+    }
+
     /// Installed container services.
     pub fn services(&self) -> Vec<(&Record, &ServiceRecord)> {
         self.packages

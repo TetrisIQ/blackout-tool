@@ -68,8 +68,8 @@ window.kitTranslatePairs = {{TRANSLATE_PAIRS}};
   var MEDIA = 'img, video, picture, canvas, iframe, object, embed';
   var css = MEDIA.split(', ').map(function (t) { return 'html.kit-dark ' + t; }).join(', ') +
     ' { filter: invert(1) hue-rotate(180deg); }';
-  // Kiwix articles get the inversion; the portal's own pages (/ai/, /maps/) take the theme directly.
-  function isArticle(path) { return !/^\/(ai|maps)\//.test(path); }
+  // Kiwix articles get the inversion; the portal's own pages (/ai/, /maps/, /games/) take the theme directly.
+  function isArticle(path) { return !/^\/(ai|maps|games)\//.test(path); }
   function theme() {
     var dark = document.documentElement.getAttribute('data-theme') === 'dark';
     try {

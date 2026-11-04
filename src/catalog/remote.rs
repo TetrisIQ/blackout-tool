@@ -19,8 +19,10 @@ pub const STAMP_FILE: &str = ".kit-sha256";
 
 /// Name and location of the catalog used when none was added.
 pub const DEFAULT_NAME: &str = "main";
-pub const DEFAULT_URL: &str =
-    "https://github.com/TetrisIQ/blackout-tool-catalog/releases/latest/download/catalog.tar.gz";
+pub const DEFAULT_URL: &str = "https://github.com/TetrisIQ/blackout-tool-catalog";
+
+/// Asset names every catalog release publishes (the checksum file is `<archive>.sha256`).
+pub const ARCHIVE_ASSET: &str = "catalog.tar.gz";
 
 /// Upper bound for what an archive may unpack to.
 const MAX_UNPACKED: u64 = 200_000_000;
@@ -157,6 +159,24 @@ pub fn validate_url(url: &str) -> Result<(), RemoteError> {
     }
 }
 
+/// A bare GitHub repository URL (`https://github.com/<owner>/<repo>`, optionally with `.git` or a
+/// trailing slash) stands for the archive of its latest release; any other URL is used as given.
+/// GitHub redirects `releases/latest/download/<asset>` to the newest release, so no API call (and
+/// no rate limit) is involved, and the checksum file is read from the same release.
+pub fn archive_url(url: &str) -> String {
+    let Some(rest) = url.strip_prefix("https://github.com/") else {
+        return url.to_string();
+    };
+    let parts: Vec<&str> = rest.trim_end_matches('/').split('/').collect();
+    match parts.as_slice() {
+        [owner, repo] if !owner.is_empty() && !repo.is_empty() => {
+            let repo = repo.strip_suffix(".git").unwrap_or(repo);
+            format!("https://github.com/{owner}/{repo}/releases/latest/download/{ARCHIVE_ASSET}")
+        }
+        _ => url.to_string(),
+    }
+}
+
 pub fn validate_sha256(hex: &str) -> Result<(), RemoteError> {
     if hex.len() == 64
         && hex
@@ -219,14 +239,14 @@ pub struct Fetched {
 pub fn fetch(http: &dyn Http, source: &Source, data_dir: &Path) -> Result<Fetched, RemoteError> {
     validate_name(&source.name)?;
     validate_url(&source.url)?;
+    let url = archive_url(&source.url);
     let expected = match &source.sha256 {
         Some(h) => h.clone(),
         None => {
-            let body = http.get(&format!("{}.sha256", source.url))?;
+            let body = http.get(&format!("{url}.sha256"))?;
             let h = body.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-            validate_sha256(&h).map_err(|_| {
-                RemoteError::Invalid(format!("{}.sha256 does not hold a SHA-256", source.url))
-            })?;
+            validate_sha256(&h)
+                .map_err(|_| RemoteError::Invalid(format!("{url}.sha256 does not hold a SHA-256")))?;
             h
         }
     };
@@ -248,7 +268,7 @@ pub fn fetch(http: &dyn Http, source: &Source, data_dir: &Path) -> Result<Fetche
     let work = root.join(format!(".fetch-{}-{}", source.name, std::process::id()));
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(io(&work))?;
-    let result = unpack_checked(http, source, &expected, &work);
+    let result = unpack_checked(http, &url, &expected, &work);
     let unpacked = match result {
         Ok(d) => d,
         Err(e) => {
@@ -281,17 +301,12 @@ pub fn fetch(http: &dyn Http, source: &Source, data_dir: &Path) -> Result<Fetche
 }
 
 /// Download, verify, unpack and test-load inside `work`; returns the catalog's top directory.
-fn unpack_checked(
-    http: &dyn Http,
-    source: &Source,
-    expected: &str,
-    work: &Path,
-) -> Result<PathBuf, RemoteError> {
+fn unpack_checked(http: &dyn Http, url: &str, expected: &str, work: &Path) -> Result<PathBuf, RemoteError> {
     let archive = work.join("catalog.tar.gz");
-    let (_, actual) = http.get_file(&source.url, &archive)?;
+    let (_, actual) = http.get_file(url, &archive)?;
     if actual != expected {
         return Err(RemoteError::Checksum {
-            url: source.url.clone(),
+            url: url.to_string(),
             expected: expected.into(),
             actual,
         });
@@ -471,6 +486,41 @@ mod tests {
         assert_eq!(load(d.path()).unwrap(), list);
         fs::write(d.path().join(SOURCES_FILE), "{\"catalogs\": [{\"name\": \"x\"}]}").unwrap();
         assert!(load(d.path()).is_err());
+    }
+
+    #[test]
+    fn a_repository_url_means_the_latest_release_archive() {
+        let latest = "https://github.com/TetrisIQ/blackout-games/releases/latest/download/catalog.tar.gz";
+        for u in [
+            "https://github.com/TetrisIQ/blackout-games",
+            "https://github.com/TetrisIQ/blackout-games/",
+            "https://github.com/TetrisIQ/blackout-games.git",
+        ] {
+            assert_eq!(archive_url(u), latest, "{u}");
+        }
+        for u in [
+            URL,
+            "https://github.com/TetrisIQ/blackout-games/releases/download/v1/catalog.tar.gz",
+            "https://github.com/TetrisIQ",
+        ] {
+            assert_eq!(archive_url(u), u, "{u}");
+        }
+    }
+
+    #[test]
+    fn fetching_a_repository_url_reads_the_latest_release() {
+        let d = tempfile::tempdir().unwrap();
+        let archive = targz(&[
+            ("catalog.yaml", "name: x\nformat: 1\n"),
+            ("wikipedia/wiki.yaml", ZIM),
+        ]);
+        let latest = "https://github.com/o/r/releases/latest/download/catalog.tar.gz";
+        let mut http = Fake::default();
+        http.texts
+            .insert(format!("{latest}.sha256"), sha256_hex(&archive));
+        http.files.insert(latest.into(), archive);
+        let src = Source::new("games", "https://github.com/o/r", None).unwrap();
+        assert!(fetch(&http, &src, d.path()).is_ok());
     }
 
     #[test]

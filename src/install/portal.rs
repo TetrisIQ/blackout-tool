@@ -110,6 +110,10 @@ mod icon {
         "0 0 640 512",
         r#"<path d="M320 0c17.7 0 32 14.3 32 32l0 64 120 0c39.8 0 72 32.2 72 72l0 272c0 39.8-32.2 72-72 72l-304 0c-39.8 0-72-32.2-72-72l0-272c0-39.8 32.2-72 72-72l120 0 0-64c0-17.7 14.3-32 32-32zM208 384c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zm96 0c-8.8 0-16 7.2-16 16s7.2 16 16 16l32 0c8.8 0 16-7.2 16-16s-7.2-16-16-16l-32 0zM264 256a40 40 0 1 0 -80 0 40 40 0 1 0 80 0zm152 40a40 40 0 1 0 0-80 40 40 0 1 0 0 80zM48 224l16 0 0 192-16 0c-26.5 0-48-21.5-48-48l0-96c0-26.5 21.5-48 48-48zm544 0c26.5 0 48 21.5 48 48l0 96c0 26.5-21.5 48-48 48l-16 0 0-192 16 0z"/>"#,
     );
+    pub const GAMES: Icon = (
+        "0 0 640 512",
+        r#"<path d="M192 64C86 64 0 150 0 256S86 448 192 448l256 0c106 0 192-86 192-192s-86-192-192-192L192 64zM496 168a40 40 0 1 1 0 80 40 40 0 1 1 0-80zM392 304a40 40 0 1 1 80 0 40 40 0 1 1 -80 0zM168 200c0-13.3 10.7-24 24-24s24 10.7 24 24l0 32 32 0c13.3 0 24 10.7 24 24s-10.7 24-24 24l-32 0 0 32c0 13.3-10.7 24-24 24s-24-10.7-24-24l0-32-32 0c-13.3 0-24-10.7-24-24s10.7-24 24-24l32 0 0-32z"/>"#,
+    );
     pub const SERVER: Icon = (
         "0 0 512 512",
         r#"<path d="M64 32C28.7 32 0 60.7 0 96l0 64c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-64c0-35.3-28.7-64-64-64L64 32zm280 72a24 24 0 1 1 0 48 24 24 0 1 1 0-48zm48 24a24 24 0 1 1 48 0 24 24 0 1 1 -48 0zM64 288c-35.3 0-64 28.7-64 64l0 64c0 35.3 28.7 64 64 64l384 0c35.3 0 64-28.7 64-64l0-64c0-35.3-28.7-64-64-64L64 288zm280 72a24 24 0 1 1 0 48 24 24 0 1 1 0-48zm56 24a24 24 0 1 1 48 0 24 24 0 1 1 -48 0z"/>"#,
@@ -239,6 +243,13 @@ fn launcher_tiles(state: &State, origin: Origin) -> String {
     }
     if matches!(origin, Origin::Front { .. }) && !state.maps().is_empty() {
         tiles.push_str(&tile(icon::MAP, "Maps", "/read.html#/maps/"));
+    }
+    if !state.games().is_empty() {
+        let href = match origin {
+            Origin::File(_) => "games/index.html",
+            Origin::Front { .. } => "/read.html#/games/",
+        };
+        tiles.push_str(&tile(icon::GAMES, "Games", href));
     }
     if matches!(origin, Origin::Front { .. }) && !state.models().is_empty() {
         tiles.push_str(&tile(icon::ASSISTANT, "Assistant", "/read.html#/ai/"));
@@ -535,7 +546,69 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     write_atomic(&dir.join("installed.json"), &render_json(state))?;
     write_assistant(state, &dir)?;
     write_translate(paths, &dir)?;
-    write_maps(paths, state, &dir)
+    write_maps(paths, state, &dir)?;
+    write_games(paths, state, &dir)
+}
+
+const GAMES_HUB: &str = include_str!("../../assets/games/hub.html");
+
+/// The game hub under `<portal>/games/`: `index.html` lists the installed browser games, and
+/// `play/<id>` links to each game's folder in the data directory (the front serves it, and the
+/// file version of the portal opens it from disk). Removed when no game is installed.
+fn write_games(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
+    let games = dir.join("games");
+    let installed = state.games();
+    if installed.is_empty() {
+        return match fs::remove_dir_all(&games) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(io_err("cannot remove", &games)(e)),
+        };
+    }
+    let play = games.join("play");
+    fs::create_dir_all(&play).map_err(io_err("cannot create", &play))?;
+    for entry in fs::read_dir(&play)
+        .map_err(io_err("cannot read", &play))?
+        .flatten()
+    {
+        let _ = fs::remove_file(entry.path());
+    }
+    let mut cards = String::new();
+    for r in &installed {
+        let link = play.join(&r.id);
+        std::os::unix::fs::symlink(paths.media_dir("games").join(&r.id), &link)
+            .map_err(io_err("cannot link", &link))?;
+        let size = r.size_bytes();
+        cards.push_str(&format!(
+            "    <li><h2>{name}</h2><p class=\"meta\">{size}Licence: {license}</p>\
+             <a class=\"btn\" href=\"play/{id}/index.html\">Play</a></li>\n",
+            name = esc(&r.name),
+            size = if size == 0 {
+                String::new()
+            } else {
+                format!("{} · ", format_bytes(size))
+            },
+            license = esc(&r.license),
+            id = url_encode(&r.id),
+        ));
+    }
+    let count = format!(
+        "{} game{}",
+        installed.len(),
+        if installed.len() == 1 { "" } else { "s" }
+    );
+    write_atomic(
+        &games.join("index.html"),
+        &fill(
+            GAMES_HUB,
+            &[
+                ("CSS", CSS),
+                ("THEME_JS", THEME_JS),
+                ("COUNT", &count),
+                ("CARDS", &cards),
+            ],
+        ),
+    )
 }
 
 /// `<portal>/translate/<pair>` links to the model folders in the data directory, so the front can
@@ -706,6 +779,39 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn installed_games_get_a_launcher_tile_and_a_hub_with_play_links() {
+        let d = tempfile::tempdir().unwrap();
+        let p = Paths::new(d.path().join("data"), d.path().join("u")).unwrap();
+        let mut st = State::default();
+        st.packages.insert("a".into(), sample_record("a", "a.zim", 1));
+        let front = |st: &State| render_page(st, Origin::Front { host: "kit.local" });
+        assert!(!front(&st).contains("Games"), "no games, no tile");
+
+        let mut game = sample_record("tetris", "games/tetris", 5_000);
+        game.kind = PackageType::Files;
+        game.name = "Tetris <b>".into();
+        st.packages.insert("tetris".into(), game);
+        assert!(front(&st).contains("href=\"/read.html#/games/\""));
+        assert!(render_index(&st).contains("href=\"games/index.html\""));
+
+        write(&p, &st).unwrap();
+        let hub = fs::read_to_string(p.portal_dir().join("games/index.html")).unwrap();
+        assert!(hub.contains("href=\"play/tetris/index.html\"") && hub.contains("1 game "));
+        assert!(hub.contains("Tetris &lt;b&gt;") && !hub.contains("{{"), "{hub}");
+        assert_eq!(
+            fs::read_link(p.portal_dir().join("games/play/tetris")).unwrap(),
+            p.media_dir("games").join("tetris")
+        );
+
+        st.packages.remove("tetris");
+        write(&p, &st).unwrap();
+        assert!(
+            !p.portal_dir().join("games").exists(),
+            "hub goes with the last game"
+        );
     }
 
     #[test]

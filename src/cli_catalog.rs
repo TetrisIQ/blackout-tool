@@ -31,7 +31,8 @@ pub enum CatalogAction {
         #[arg(long, env = "KIT_DATA_DIR")]
         data_dir: Option<PathBuf>,
     },
-    /// Add a catalog: the URL of its `catalog.tar.gz` (its `.sha256` file sits next to it)
+    /// Add a catalog: a GitHub repository URL (its latest release is used), or the URL of a
+    /// `catalog.tar.gz` (its `.sha256` file sits next to it)
     Add {
         /// Short name (`[a-z0-9][a-z0-9_-]*`)
         name: String,

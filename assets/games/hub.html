@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Games - Blackout</title>
+<style>
+{{CSS}}
+main.hub { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.hub h1 { font-family: var(--font-heading); margin: 0 0 .25rem; }
+.hub .sub { margin: 0 0 1.5rem; opacity: .75; }
+.hub ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+.hub li { background: var(--color-surface); border: 1px solid var(--color-divider); border-radius: var(--radius-md); padding: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.hub li h2 { font-family: var(--font-heading); font-size: 1.3rem; margin: 0; }
+.hub li .meta { font-size: .85rem; opacity: .75; flex: 1; }
+</style>
+<script>{{THEME_JS}}</script>
+</head>
+<body>
+<main class="hub">
+  <h1>Games</h1>
+  <p class="sub">{{COUNT}} installed. They run in the browser and need no network.</p>
+  <ul>
+{{CARDS}}  </ul>
+</main>
+</body>
+</html>

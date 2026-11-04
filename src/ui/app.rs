@@ -2378,7 +2378,7 @@ impl App {
                     );
                     ui.add(
                         egui::TextEdit::singleline(&mut d.url)
-                            .hint_text("https://example.org/releases/latest/download/catalog.tar.gz")
+                            .hint_text("https://github.com/owner/catalog-repo")
                             .desired_width(560.0),
                     );
                     ui.add(
