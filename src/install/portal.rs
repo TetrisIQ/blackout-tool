@@ -5,6 +5,9 @@
 use std::fs;
 use std::path::Path;
 
+use sha2::Digest;
+
+use super::pwa_icon;
 use super::state::State;
 use super::{DEFAULT_PORT, Paths, io_err};
 use crate::catalog::manifest::PackageType;
@@ -247,7 +250,8 @@ fn launcher_tiles(state: &State, origin: Origin) -> String {
     if !state.games().is_empty() {
         let href = match origin {
             Origin::File(_) => "games/index.html",
-            Origin::Front { .. } => "/read.html#/games/",
+            // Not in the reading frame: a frame cannot install the hub as an app.
+            Origin::Front { .. } => "/games/",
         };
         tiles.push_str(&tile(icon::GAMES, "Games", href));
     }
@@ -554,10 +558,74 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
 }
 
 const GAMES_HUB: &str = include_str!("../../assets/games/hub.html");
+const GAMES_SW: &str = include_str!("../../assets/games/sw.js");
+const GAMES_MANIFEST: &str = include_str!("../../assets/games/manifest.webmanifest");
 
-/// The game hub under `<portal>/games/`: `index.html` lists the installed browser games, and
+/// What a game ships in `game.yml` (read leniently; the catalog already validated it).
+#[derive(serde::Deserialize, Default)]
+struct GameMeta {
+    description: Option<String>,
+    controls: Option<Vec<String>>,
+    version: Option<String>,
+    entry: Option<String>,
+}
+
+/// Files of a game that the browser needs (no tests, docs or hidden files), as paths relative to
+/// the game folder, plus a revision hash over their names and contents.
+fn game_files(root: &Path) -> (Vec<String>, String) {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let skip = name.starts_with('.')
+                || matches!(
+                    name.as_str(),
+                    "test" | "tests" | "node_modules" | "README.md" | "game.yml" | "game.yaml"
+                )
+                || name.ends_with(".test.js");
+            let Ok(kind) = e.file_type() else { continue };
+            if skip || kind.is_symlink() {
+                continue;
+            }
+            let path = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
+            };
+            if kind.is_dir() {
+                walk(&e.path(), &path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(root, "", &mut files);
+    let mut hash = sha2::Sha256::new();
+    for f in &files {
+        hash.update(f.as_bytes());
+        hash.update(fs::read(root.join(f)).unwrap_or_default());
+    }
+    let rev: String = hash
+        .finalize()
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    (files, rev)
+}
+
+/// Makes JSON safe to embed in a `<script>` element.
+fn script_json(v: &serde_json::Value) -> String {
+    v.to_string().replace("</", "<\\/").replace("<!--", "<\\!--")
+}
+
+/// The game hub under `<portal>/games/`: `index.html` is the library (Steam-like, data inlined),
 /// `play/<id>` links to each game's folder in the data directory (the front serves it, and the
-/// file version of the portal opens it from disk). Removed when no game is installed.
+/// file version of the portal opens it from disk). Next to it lie the PWA parts (manifest, icons,
+/// service worker) so a phone can install the hub and save the games for offline use. Removed
+/// when no game is installed.
 fn write_games(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
     let games = dir.join("games");
     let installed = state.games();
@@ -576,30 +644,41 @@ fn write_games(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::In
     {
         let _ = fs::remove_file(entry.path());
     }
+    let mut data = Vec::new();
     let mut cards = String::new();
+    let mut all_revs = String::new();
     for r in &installed {
+        let root = paths.media_dir("games").join(&r.id);
         let link = play.join(&r.id);
-        std::os::unix::fs::symlink(paths.media_dir("games").join(&r.id), &link)
-            .map_err(io_err("cannot link", &link))?;
-        let size = r.size_bytes();
+        std::os::unix::fs::symlink(&root, &link).map_err(io_err("cannot link", &link))?;
+        // Older releases of the games catalog ship `game.yaml`.
+        let meta: GameMeta = fs::read_to_string(root.join("game.yml"))
+            .or_else(|_| fs::read_to_string(root.join("game.yaml")))
+            .ok()
+            .and_then(|y| serde_yaml_ng::from_str(&y).ok())
+            .unwrap_or_default();
+        let entry = meta.entry.unwrap_or_else(|| "index.html".into());
+        let (files, rev) = game_files(&root);
+        all_revs.push_str(&rev);
         cards.push_str(&format!(
-            "    <li><h2>{name}</h2><p class=\"meta\">{size}Licence: {license}</p>\
-             <a class=\"btn\" href=\"play/{id}/index.html\">Play</a></li>\n",
-            name = esc(&r.name),
-            size = if size == 0 {
-                String::new()
-            } else {
-                format!("{} · ", format_bytes(size))
-            },
-            license = esc(&r.license),
-            id = url_encode(&r.id),
+            "<li><a href=\"play/{}/{}\">{}</a></li>\n",
+            url_encode(&r.id),
+            esc(&entry),
+            esc(&r.name)
         ));
+        data.push(serde_json::json!({
+            "id": r.id,
+            "name": r.name,
+            "description": meta.description.unwrap_or_default(),
+            "controls": meta.controls.unwrap_or_default(),
+            "version": meta.version.or_else(|| r.version.clone()),
+            "license": r.license,
+            "size": r.size_bytes(),
+            "entry": entry,
+            "rev": rev,
+            "files": files,
+        }));
     }
-    let count = format!(
-        "{} game{}",
-        installed.len(),
-        if installed.len() == 1 { "" } else { "s" }
-    );
     write_atomic(
         &games.join("index.html"),
         &fill(
@@ -607,11 +686,27 @@ fn write_games(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::In
             &[
                 ("CSS", CSS),
                 ("THEME_JS", THEME_JS),
-                ("COUNT", &count),
                 ("CARDS", &cards),
+                ("DATA", &script_json(&serde_json::Value::Array(data))),
             ],
         ),
-    )
+    )?;
+    // The service worker changes with the games, so browsers replace the hub shell.
+    let mut sw_rev = sha2::Sha256::new();
+    sw_rev.update(all_revs.as_bytes());
+    sw_rev.update(GAMES_HUB.as_bytes());
+    let sw_rev: String = sw_rev
+        .finalize()
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    write_atomic(&games.join("sw.js"), &fill(GAMES_SW, &[("REV", &sw_rev)]))?;
+    write_atomic(&games.join("manifest.webmanifest"), GAMES_MANIFEST)?;
+    write_atomic_bytes(&games.join("icon-192.png"), &pwa_icon::png(192, false))?;
+    write_atomic_bytes(&games.join("icon-512.png"), &pwa_icon::png(512, false))?;
+    write_atomic_bytes(&games.join("icon-maskable-512.png"), &pwa_icon::png(512, true))?;
+    write_atomic_bytes(&games.join("apple-touch-icon.png"), &pwa_icon::png(180, true))
 }
 
 /// `<portal>/translate/<pair>` links to the model folders in the data directory, so the front can
@@ -797,13 +892,50 @@ mod tests {
         game.kind = PackageType::Files;
         game.name = "Tetris <b>".into();
         st.packages.insert("tetris".into(), game);
-        assert!(front(&st).contains("href=\"/read.html#/games/\""));
+        assert!(front(&st).contains("href=\"/games/\""));
         assert!(render_index(&st).contains("href=\"games/index.html\""));
 
+        let root = p.media_dir("games").join("tetris");
+        fs::create_dir_all(root.join("test")).unwrap();
+        fs::write(root.join("index.html"), "<html>").unwrap();
+        fs::write(root.join("game.js"), "x").unwrap();
+        fs::write(root.join("test/a.test.js"), "t").unwrap();
+        fs::write(
+            root.join("game.yaml"),
+            "id: tetris\ntitle: T\ndescription: Stack </script> blocks\ncontrols: [\"Arrows\"]\nunknown: 1\n",
+        )
+        .unwrap();
+
         write(&p, &st).unwrap();
-        let hub = fs::read_to_string(p.portal_dir().join("games/index.html")).unwrap();
-        assert!(hub.contains("href=\"play/tetris/index.html\"") && hub.contains("1 game "));
-        assert!(hub.contains("Tetris &lt;b&gt;") && !hub.contains("{{"), "{hub}");
+        let games = p.portal_dir().join("games");
+        let hub = fs::read_to_string(games.join("index.html")).unwrap();
+        assert!(
+            hub.contains("href=\"play/tetris/index.html\"") && hub.contains("Tetris &lt;b&gt;"),
+            "{hub}"
+        );
+        let json = hub
+            .split("id=\"data\">")
+            .nth(1)
+            .unwrap()
+            .split("</script>")
+            .next()
+            .unwrap();
+        let data: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(data[0]["files"], serde_json::json!(["game.js", "index.html"]));
+        assert_eq!(data[0]["description"], "Stack </script> blocks");
+        assert_eq!(data[0]["controls"][0], "Arrows");
+        assert_eq!(data[0]["rev"].as_str().unwrap().len(), 12);
+        let sw = fs::read_to_string(games.join("sw.js")).unwrap();
+        assert!(sw.contains("kit-hub-shell-") && !sw.contains("{{"));
+        for f in [
+            "manifest.webmanifest",
+            "icon-192.png",
+            "icon-512.png",
+            "icon-maskable-512.png",
+            "apple-touch-icon.png",
+        ] {
+            assert!(games.join(f).exists(), "{f}");
+        }
         assert_eq!(
             fs::read_link(p.portal_dir().join("games/play/tetris")).unwrap(),
             p.media_dir("games").join("tetris")

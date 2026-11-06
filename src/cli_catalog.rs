@@ -13,6 +13,23 @@ use crate::catalog::http::Http;
 use crate::catalog::remote::{self, Source};
 use crate::cli::{Env, Outcome};
 
+/// Rewrites the portal pages (launcher, game library, ...) from the installed state, so a newer
+/// `kit` shows its pages without reinstalling anything. Touches no service; skipped while another
+/// `kit` holds the state.
+fn refresh_portal(env: &Env, data: &Path, out: &mut dyn Write) -> Result<()> {
+    use crate::install::{InstallError, state::StateGuard};
+    let paths = crate::cli::paths_for(env, data.to_path_buf())?;
+    match StateGuard::open(&paths) {
+        Ok(guard) => {
+            crate::install::portal::write(&paths, &guard)?;
+            writeln!(out, "portal pages refreshed")?;
+        }
+        Err(InstallError::Busy(_)) => writeln!(out, "portal pages not refreshed: another kit is working")?,
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
 /// Catalog installed by a distribution package; used when no source was added.
 const SYSTEM_CATALOG: &str = "/usr/share/emergency-kit/catalog";
 
@@ -330,6 +347,7 @@ pub fn catalog_cmd(args: &CatalogArgs, env: &Env, offline: bool, out: &mut dyn W
                     }
                 }
             }
+            refresh_portal(env, &data, out)?;
             if failed > 0 {
                 bail!(
                     "{failed} of {} catalogs could not be updated; the old copies stay in use",

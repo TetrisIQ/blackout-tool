@@ -2,26 +2,300 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Games - Blackout</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#1a1917">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Games">
 <style>
 {{CSS}}
-main.hub { max-width: 56rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-.hub h1 { font-family: var(--font-heading); margin: 0 0 .25rem; }
-.hub .sub { margin: 0 0 1.5rem; opacity: .75; }
-.hub ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
-.hub li { background: var(--color-surface); border: 1px solid var(--color-divider); border-radius: var(--radius-md); padding: 1rem; display: flex; flex-direction: column; gap: .5rem; }
-.hub li h2 { font-family: var(--font-heading); font-size: 1.3rem; margin: 0; }
-.hub li .meta { font-size: .85rem; opacity: .75; flex: 1; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+button { font: inherit; color: inherit; }
+.g-lib { display: grid; grid-template-columns: 17rem 1fr; height: 100vh; height: 100dvh; }
+.g-side { background: var(--color-surface); border-right: 1px solid var(--color-divider); display: flex; flex-direction: column; min-height: 0; }
+.g-brand { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-4) var(--space-2); }
+.g-brand img { width: 40px; height: 40px; border-radius: 10px; }
+.g-brand .kicker { display: block; padding: 0; }
+.g-brand b { font-family: var(--font-heading); font-size: 26px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+.g-portal-link { margin: 0 var(--space-4); font-size: 12px; color: var(--color-neutral-700); text-decoration: none; }
+.g-portal-link:hover { color: var(--color-accent-800); text-decoration: underline; }
+.g-search { margin: var(--space-3) var(--space-4) var(--space-2); }
+.g-search input { width: 100%; height: 40px; background: var(--color-bg); border: 1px solid var(--color-divider); color: var(--color-text); border-radius: 20px; padding: 0 16px; font: inherit; font-size: 14px; caret-color: var(--color-accent); }
+.g-search input:hover, .g-search input:focus { border-color: var(--color-accent); outline: 0; }
+.g-filters { display: flex; gap: 6px; padding: 0 var(--space-4) var(--space-3); flex-wrap: wrap; }
+.g-filters button { background: transparent; border: 1px solid var(--color-divider); border-radius: 3px; padding: 2px 10px; font-size: 11px; letter-spacing: .02em; color: var(--color-neutral-700); cursor: pointer; }
+.g-filters button:hover { border-color: var(--color-accent); }
+.g-filters button[aria-pressed=true] { border-color: var(--color-accent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
+.g-list { list-style: none; margin: 0; padding: 0 var(--space-2); overflow-y: auto; flex: 1; }
+.g-list li { margin: 0; }
+.g-list a { display: flex; align-items: center; gap: var(--space-3); padding: 6px var(--space-2); border-radius: var(--radius-md); text-decoration: none; color: var(--color-text); font-size: 14px; }
+.g-list a:hover { background: var(--color-accent-100); color: var(--color-text); }
+.g-list a[aria-current=true] { background: var(--color-accent-100); box-shadow: inset 2px 0 0 var(--color-accent); }
+.g-list .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-list .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-accent); flex: none; }
+.g-list .g-home { font-family: var(--font-heading); font-weight: 600; font-size: 17px; }
+.g-empty { padding: var(--space-4); color: var(--color-neutral-700); font-size: 13px; }
+.g-side-foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-divider); display: flex; flex-direction: column; gap: var(--space-2); font-size: 12px; color: var(--color-neutral-700); }
+.g-pill { display: inline-flex; align-items: center; gap: 6px; }
+.g-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-neutral-600); }
+.g-pill.ok i { background: var(--color-accent); }
+
+/* Covers: muted tones of the portal palette, one hue per game, the first letter in a ring. */
+.g-cv { --h: 200; position: relative; overflow: hidden; display: grid; place-items: center; flex: none; color: #f6ecd9;
+  background: radial-gradient(circle at 30% 18%, hsl(var(--h) 38% 46% / .8), transparent 60%), linear-gradient(160deg, hsl(var(--h) 28% 26%), hsl(calc(var(--h) + 30) 30% 12%)); }
+.g-cv::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(45deg, transparent 0 14px, rgba(255,255,255,.035) 14px 15px); }
+.g-cv span { position: relative; z-index: 1; display: grid; place-items: center; width: 1.9em; height: 1.9em; border: 1px solid var(--color-accent); border-radius: 50%;
+  font-family: var(--font-heading); font-weight: 600; line-height: 1; padding-bottom: .08em; color: #f0cc8c; }
+.g-cv.g-sm { width: 32px; height: 32px; border-radius: var(--radius-md); font-size: 12px; }
+
+.g-main { overflow-y: auto; min-width: 0; }
+.g-back { display: none; }
+.g-pad { padding: var(--space-6) var(--space-8) var(--space-8); max-width: 72rem; }
+.g-main h1 { font-size: 42px; font-weight: 400; line-height: 1.05; margin: 0 0 var(--space-2); }
+.g-main h2 { font-family: var(--font-body); font-size: 10px; font-weight: 400; text-transform: uppercase; letter-spacing: .1em; color: var(--color-accent-700); margin: var(--space-8) 0 var(--space-3); }
+.g-sub { color: var(--color-neutral-700); margin: 0 0 var(--space-4); font-size: 14px; }
+.g-shelf { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.g-tile { display: flex; flex-direction: column; gap: var(--space-2); text-decoration: none; color: var(--color-text); position: relative; }
+.g-tile .g-cv { aspect-ratio: 3 / 4; border-radius: var(--radius-md); font-size: 30px; border: 1px solid var(--color-divider); transition: border-color .15s; }
+.g-tile:hover .g-cv, .g-tile:focus-visible .g-cv { border-color: var(--color-accent); }
+.g-tile:hover { color: var(--color-text); }
+.g-tile .g-n { font-family: var(--font-heading); font-size: 19px; font-weight: 600; line-height: 1.2; }
+.g-tile .g-badge { position: absolute; top: 8px; right: 8px; z-index: 2; display: inline-flex; font-size: 11px; letter-spacing: .02em; padding: 2px 8px; border: 1px solid var(--color-accent); border-radius: 3px; color: var(--color-accent); background: color-mix(in srgb, var(--color-bg) 82%, transparent); }
+.g-tile .g-star { position: absolute; top: 6px; left: 9px; z-index: 2; color: var(--color-accent); text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.g-feature { display: flex; gap: var(--space-4); align-items: stretch; border: 1px solid var(--color-divider); border-radius: var(--radius-md); overflow: hidden; text-decoration: none; color: var(--color-text); }
+.g-feature:hover { border-color: var(--color-accent); color: var(--color-text); }
+.g-feature .g-cv { width: 9rem; font-size: 36px; }
+.g-feature .g-body { padding: var(--space-3) var(--space-4) var(--space-3) 0; display: flex; flex-direction: column; gap: var(--space-1); justify-content: center; min-width: 0; }
+.g-feature h1 { font-size: 30px; font-weight: 600; margin: 0; }
+.g-feature .g-k { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent-700); }
+.g-feature .g-d { color: var(--color-neutral-700); font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.g-banner { height: 13rem; width: 100%; font-size: 64px; border-bottom: 1px solid var(--color-divider); }
+.g-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin: var(--space-4) 0; }
+.g-play { white-space: nowrap; cursor: pointer; text-decoration: none; display: inline-flex; gap: 8px; align-items: center; justify-content: center;
+  font-family: var(--font-heading); font-weight: 600; font-size: 19px; line-height: 1.2; padding: 8px 30px; border-radius: var(--radius-md);
+  background: var(--color-accent); color: #1a1917; border: 1px solid var(--color-accent); }
+.g-play:hover { background: var(--color-accent-700); border-color: var(--color-accent-700); color: #1a1917; }
+:root[data-theme=light] .g-play { color: #fff; }
+:root[data-theme=light] .g-play:hover { color: #fff; }
+.g-sec { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-family: var(--font-heading); font-weight: 600; font-size: 15px; line-height: 1.2; color: var(--color-text);
+  background: transparent; border: 1px solid var(--color-divider); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); }
+.g-sec:hover:not(:disabled) { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.g-sec:disabled { opacity: .55; cursor: default; }
+.g-sec.g-on { color: var(--color-accent); border-color: var(--color-accent); }
+.g-stats { display: flex; flex-wrap: wrap; gap: var(--space-6); padding: var(--space-3) var(--space-4); border: 1px solid var(--color-divider); border-radius: var(--radius-md); }
+.g-stats div { display: flex; flex-direction: column; font-size: 14px; }
+.g-stats small { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-accent-700); }
+.g-cols { display: grid; gap: var(--space-6); grid-template-columns: 2fr 1fr; align-items: start; }
+.g-detail p { line-height: 1.6; margin: 0; }
+.g-detail ul { margin: 0; padding-left: 1.1rem; line-height: 1.7; }
+.g-bar { height: 4px; background: var(--color-divider); border-radius: 2px; overflow: hidden; width: 12rem; }
+.g-bar b { display: block; height: 100%; background: var(--color-accent); width: 0; transition: width .15s; }
+.g-note { color: var(--color-neutral-700); font-size: 13px; }
+
+@media (max-width: 760px) {
+  .g-lib { grid-template-columns: 1fr; }
+  .g-side { border-right: 0; }
+  .g-lib[data-view=game] .g-side { display: none; }
+  .g-lib[data-view=home] .g-main { display: none; }
+  .g-detail { position: relative; }
+  .g-back { display: inline-flex; position: absolute; top: 10px; left: 12px; z-index: 3; text-decoration: none; font-size: 12px; color: var(--color-text);
+    padding: 3px 10px; border: 1px solid var(--color-accent); border-radius: 3px; background: color-mix(in srgb, var(--color-bg) 82%, transparent); }
+  .g-banner { height: 10rem; font-size: 48px; }
+  .g-cols { grid-template-columns: 1fr; }
+  .g-pad { padding: var(--space-4) var(--space-4) var(--space-8); }
+  .g-main h1 { font-size: 34px; }
+  .g-feature .g-cv { width: 6rem; font-size: 24px; }
+  .g-play { flex: 1 1 100%; }
+}
+@media (display-mode: standalone) { .install-only-browser { display: none; } }
 </style>
 <script>{{THEME_JS}}</script>
 </head>
 <body>
-<main class="hub">
-  <h1>Games</h1>
-  <p class="sub">{{COUNT}} installed. They run in the browser and need no network.</p>
-  <ul>
-{{CARDS}}  </ul>
-</main>
+<div class="g-lib" id="lib" data-view="home">
+  <aside class="g-side">
+    <div class="g-brand"><img src="icon-192.png" alt=""><div><span class="kicker">Blackout</span><b>Game library</b></div></div>
+    <a class="g-portal-link install-only-browser" id="portal-link" href="/" target="_top">‹ Back to Blackout</a>
+    <div class="g-search"><input id="q" type="search" placeholder="Search games" aria-label="Search games" autocomplete="off"></div>
+    <div class="g-filters" id="filters">
+      <button data-f="all" aria-pressed="true">All</button>
+      <button data-f="fav" aria-pressed="false">★ Favorites</button>
+      <button data-f="recent" aria-pressed="false">Recent</button>
+      <button data-f="offline" aria-pressed="false">Offline</button>
+    </div>
+    <ul class="g-list" id="list"></ul>
+    <div class="g-side-foot">
+      <span class="g-pill" id="net"><i></i><span>Checking…</span></span>
+      <button class="g-sec install-only-browser" id="install" hidden>Install as app</button>
+      <span id="foot-note"></span>
+    </div>
+  </aside>
+  <main class="g-main" id="main"></main>
+</div>
+<noscript><ul>
+{{CARDS}}</ul><p>The library needs JavaScript.</p></noscript>
+<script type="application/json" id="data">{{DATA}}</script>
+<script>
+(function () {
+  'use strict';
+  var GAMES = JSON.parse(document.getElementById('data').textContent);
+  var byId = {}; GAMES.forEach(function (g) { byId[g.id] = g; });
+  var $ = function (id) { return document.getElementById(id); };
+  var lib = $('lib'), main = $('main'), listEl = $('list');
+  var filter = 'all', query = '', current = null, offline = {}, busy = {};
+  var canCache = 'caches' in window && window.isSecureContext;
+
+  function store(k, v) { try { if (v === undefined) return JSON.parse(localStorage.getItem('kit-games:' + k)); if (v === null) localStorage.removeItem('kit-games:' + k); else localStorage.setItem('kit-games:' + k, JSON.stringify(v)); } catch (e) {} return null; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function hue(id) { var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
+  function cover(g, cls) { return '<div class="g-cv ' + (cls || '') + '" style="--h:' + hue(g.id) + '"><span>' + esc(g.name.charAt(0).toUpperCase()) + '</span></div>'; }
+  function bytes(n) { if (!n) return '–'; var u = ['B', 'kB', 'MB', 'GB'], i = 0; while (n >= 1000 && i < 3) { n /= 1000; i++; } return (n < 10 && i ? n.toFixed(1) : Math.round(n)) + ' ' + u[i]; }
+  function ago(t) { if (!t) return 'Never'; var s = (Date.now() - t) / 1000; if (s < 90) return 'Just now'; if (s < 5400) return Math.round(s / 60) + ' min ago'; if (s < 129600) return Math.round(s / 3600) + ' h ago'; return Math.round(s / 86400) + ' days ago'; }
+  function plays(id) { return store('played:' + id) || { last: 0, count: 0 }; }
+  function isFav(id) { return !!store('fav:' + id); }
+  function state(g) { var r = offline[g.id]; return !r ? 'none' : r === g.rev ? 'ok' : 'old'; }
+
+  // ---- offline storage (one cache per game) -------------------------------------------------
+  function refreshOffline() {
+    if (!canCache) return Promise.resolve();
+    return caches.keys().then(function (keys) {
+      offline = {};
+      keys.forEach(function (k) { if (k.indexOf('kit-game-') === 0) { var id = k.slice(9); if (byId[id]) offline[id] = store('rev:' + id) || 'unknown'; else caches.delete(k); } });
+    });
+  }
+  function save(g, onProgress) {
+    var name = 'kit-game-' + g.id, done = 0;
+    busy[g.id] = 0;
+    return caches.open(name).then(function (c) {
+      return g.files.reduce(function (p, f) {
+        return p.then(function () {
+          return fetch('play/' + encodeURIComponent(g.id) + '/' + f.split('/').map(encodeURIComponent).join('/'), { cache: 'reload' }).then(function (r) {
+            if (!r.ok) throw new Error(f + ': ' + r.status);
+            return c.put('play/' + encodeURIComponent(g.id) + '/' + f.split('/').map(encodeURIComponent).join('/'), r);
+          }).then(function () { done++; busy[g.id] = done / g.files.length; onProgress(); });
+        });
+      }, Promise.resolve());
+    }).then(function () { store('rev:' + g.id, g.rev); offline[g.id] = g.rev; delete busy[g.id]; }, function (e) {
+      delete busy[g.id]; caches.delete(name); delete offline[g.id]; alert('Could not save ' + g.name + ': ' + e.message);
+    });
+  }
+  function drop(g) { return caches.delete('kit-game-' + g.id).then(function () { store('rev:' + g.id, null); delete offline[g.id]; }); }
+
+  // ---- rendering ----------------------------------------------------------------------------
+  function visible() {
+    var q = query.trim().toLowerCase();
+    var out = GAMES.filter(function (g) {
+      if (q && (g.name + ' ' + g.description).toLowerCase().indexOf(q) < 0) return false;
+      if (filter === 'fav') return isFav(g.id);
+      if (filter === 'recent') return plays(g.id).last > 0;
+      if (filter === 'offline') return state(g) !== 'none';
+      return true;
+    });
+    if (filter === 'recent') out.sort(function (a, b) { return plays(b.id).last - plays(a.id).last; });
+    else out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return out;
+  }
+  function renderList() {
+    var items = visible();
+    listEl.innerHTML = '<li><a class="g-home" href="#" ' + (current ? '' : 'aria-current="true"') + '>⌂ Home</a></li>' + (items.length ? items.map(function (g) {
+      return '<li><a href="#' + encodeURIComponent(g.id) + '"' + (current === g.id ? ' aria-current="true"' : '') + '>' + cover(g, 'g-sm') + '<span class="t">' + esc(g.name) + '</span>' + (state(g) === 'ok' ? '<i class="g-dot" title="Saved offline"></i>' : '') + '</a></li>';
+    }).join('') : '<li class="g-empty">No games match.</li>');
+  }
+  function tile(g) {
+    return '<a class="g-tile" href="#' + encodeURIComponent(g.id) + '">' + (isFav(g.id) ? '<span class="g-star">★</span>' : '') + (state(g) !== 'none' ? '<span class="g-badge">Offline</span>' : '') + cover(g) + '<span class="g-n">' + esc(g.name) + '</span></a>';
+  }
+  function renderHome() {
+    var recent = GAMES.filter(function (g) { return plays(g.id).last; }).sort(function (a, b) { return plays(b.id).last - plays(a.id).last; });
+    var h = '<div class="g-pad"><h1>Home</h1><p class="g-sub">' + GAMES.length + ' game' + (GAMES.length === 1 ? '' : 's') + ' · they run in the browser and need no internet.</p>';
+    if (recent.length) {
+      var g = recent[0];
+      h += '<h2>Continue playing</h2><a class="g-feature" href="' + playHref(g) + '" data-play="' + esc(g.id) + '">' + cover(g) + '<div class="g-body"><span class="g-k">Last played ' + ago(plays(g.id).last) + '</span><h1>' + esc(g.name) + '</h1><span class="g-d">' + esc(g.description) + '</span></div></a>';
+    }
+    var favs = GAMES.filter(function (g) { return isFav(g.id); });
+    if (favs.length) h += '<h2>Favorites</h2><div class="g-shelf">' + favs.map(tile).join('') + '</div>';
+    h += '<h2>All games</h2><div class="g-shelf">' + visible().map(tile).join('') + '</div>';
+    if (canCache) {
+      var missing = GAMES.filter(function (g) { return state(g) !== 'ok'; });
+      if (missing.length) h += '<h2>Offline</h2><p class="g-note">Save the games on this device and they keep working without the laptop.</p><p><button class="g-sec" id="all-off">Save all for offline (' + bytes(missing.reduce(function (s, g) { return s + g.size; }, 0)) + ')</button></p>';
+    }
+    main.innerHTML = h + '</div>';
+    var b = $('all-off');
+    if (b) b.onclick = function () { b.disabled = true; GAMES.reduce(function (p, g) { return state(g) === 'ok' ? p : p.then(function () { b.textContent = 'Saving ' + g.name + '…'; return save(g, function () {}); }); }, Promise.resolve()).then(route); };
+  }
+  function playHref(g) { return 'play/' + encodeURIComponent(g.id) + '/' + g.entry.split('/').map(encodeURIComponent).join('/'); }
+  function renderGame(g) {
+    var p = plays(g.id), st = state(g), pr = busy[g.id];
+    var off;
+    if (!canCache) off = '<button class="g-sec" disabled>Offline saving needs HTTPS</button>';
+    else if (pr !== undefined) off = '<span class="g-note">Saving… ' + Math.round(pr * 100) + ' %</span><span class="g-bar"><b style="width:' + pr * 100 + '%"></b></span>';
+    else if (st === 'ok') off = '<button class="g-sec" id="off-rm">✓ Saved on this device · Remove</button>';
+    else if (st === 'old') off = '<button class="g-sec" id="off-add">Update offline copy</button>';
+    else off = '<button class="g-sec" id="off-add">⬇ Save for offline (' + bytes(g.size) + ')</button>';
+    var h = '<div class="g-detail"><a class="g-back" href="#">‹ Library</a>' + cover(g, 'g-banner') + '<div class="g-pad"><h1>' + esc(g.name) + '</h1>' +
+      '<div class="g-actions"><a class="g-play" id="play" href="' + playHref(g) + '">▶ Play</a>' + off +
+      '<button class="g-sec' + (isFav(g.id) ? ' g-on' : '') + '" id="fav" aria-pressed="' + isFav(g.id) + '">' + (isFav(g.id) ? '★ Favorite' : '☆ Favorite') + '</button></div>' +
+      '<div class="g-stats"><div><small>Last played</small>' + ago(p.last) + '</div><div><small>Launches</small>' + p.count + '</div><div><small>Size</small>' + bytes(g.size) + '</div><div><small>Offline</small>' + (st === 'ok' ? 'Saved' : st === 'old' ? 'Outdated' : 'Not saved') + '</div></div>' +
+      '<div class="g-cols"><div><h2>About</h2><p>' + esc(g.description) + '</p>' +
+      (g.controls.length ? '<h2>Controls</h2><ul>' + g.controls.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : '') + '</div>' +
+      '<div><h2>Details</h2><ul><li>License: ' + esc(g.license) + '</li>' + (g.version ? '<li>Version: ' + esc(g.version) + '</li>' : '') + '<li>' + g.files.length + ' files</li></ul></div></div></div></div>';
+    main.innerHTML = h;
+    $('play').onclick = function () { var q = plays(g.id); store('played:' + g.id, { last: Date.now(), count: q.count + 1 }); };
+    $('fav').onclick = function () { store('fav:' + g.id, isFav(g.id) ? null : true); renderAll(); };
+    var a = $('off-add'), r = $('off-rm');
+    if (a) a.onclick = function () { save(g, function () { if (current === g.id) renderGame(g); }).then(renderAll); renderGame(g); };
+    if (r) r.onclick = function () { drop(g).then(renderAll); };
+  }
+  function renderAll() { renderList(); if (current && byId[current]) renderGame(byId[current]); else renderHome(); }
+  function route() {
+    var id = decodeURIComponent(location.hash.slice(1));
+    current = byId[id] ? id : null;
+    lib.setAttribute('data-view', current ? 'game' : 'home');
+    main.scrollTop = 0;
+    renderAll();
+  }
+
+  // Home plays the "continue" game: count that launch too.
+  main.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-play]');
+    if (a) { var id = a.getAttribute('data-play'), q = plays(id); store('played:' + id, { last: Date.now(), count: q.count + 1 }); }
+  });
+  $('q').addEventListener('input', function (e) { query = e.target.value; renderList(); if (!current) renderHome(); });
+  $('filters').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    filter = b.getAttribute('data-f');
+    Array.prototype.forEach.call($('filters').children, function (x) { x.setAttribute('aria-pressed', x === b); });
+    renderList(); if (!current) renderHome();
+  });
+  window.addEventListener('hashchange', route);
+  window.addEventListener('pageshow', function (e) { if (e.persisted) route(); });
+
+  // ---- app install + service worker ---------------------------------------------------------
+  if (location.protocol === 'file:') $('portal-link').setAttribute('href', '../index.html');
+  var deferred = null;
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; $('install').hidden = false; });
+  $('install').onclick = function () { if (deferred) { deferred.prompt(); deferred = null; $('install').hidden = true; } };
+  function net() {
+    var el = $('net'), t = el.querySelector('span'), standalone = matchMedia('(display-mode: standalone)').matches;
+    var on = navigator.onLine;
+    el.className = 'g-pill ' + (on ? 'ok' : '');
+    t.textContent = on ? 'Online' : 'Offline (saved games only)';
+    var note = $('foot-note');
+    if (!window.isSecureContext) note.textContent = 'To save games and install this as an app, open the library over HTTPS (the kit: https://kit.local) or on localhost.';
+    else if (!standalone && /iphone|ipad/i.test(navigator.userAgent)) note.textContent = 'On iPhone: Share → Add to Home Screen.';
+    else note.textContent = '';
+  }
+  window.addEventListener('online', net); window.addEventListener('offline', net); net();
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(function () {});
+  // Remove stored copies of games that are gone, then draw.
+  route();
+  refreshOffline().then(route, function () {});
+})();
+</script>
 </body>
 </html>

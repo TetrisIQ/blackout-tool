@@ -8,6 +8,7 @@ pub mod flatpak;
 pub mod media;
 pub mod model;
 pub mod portal;
+mod pwa_icon;
 pub mod reconcile;
 pub mod relocate;
 pub mod runner;

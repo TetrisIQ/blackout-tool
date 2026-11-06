@@ -55,6 +55,9 @@ window.kitTranslatePairs = {{TRANSLATE_PAIRS}};
   var frame = document.getElementById('page');
   function target() {
     var t = decodeURI(location.hash.slice(1));
+    // This page inside itself (an old cached portal page in the frame): use what it points at.
+    while (/^\/read\.html#/.test(t)) t = t.replace(/^\/read\.html#/, '');
+    if (t === '/read.html') return '/';
     // A path on this origin, or a service under it (https://<name>.<this host>/): never another site.
     if (/^\/[^\/]/.test(t)) return t;
     try {
@@ -93,6 +96,7 @@ window.kitTranslatePairs = {{TRANSLATE_PAIRS}};
     if (window.kitTranslate) kitTranslate.onLoad(frame, isArticle);
     try {
       var w = frame.contentWindow, l = w.location;
+      if (l.pathname === '/read.html') { frame.src = target(); return; }
       history.replaceState(null, '', '#' + l.pathname + l.search + l.hash);
       document.title = (w.document.title ? w.document.title + ' - ' : '') + 'Blackout';
     } catch (e) {}

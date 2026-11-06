@@ -166,6 +166,13 @@ fn two_catalogs_are_added_ordered_updated_and_removed() {
 
     let o = home.kit(&["catalog", "update", "a"]);
     assert!(text(&o.stdout).contains("up to date"), "{}", text(&o.stdout));
+    // The pages are rewritten from the state; with nothing installed there is no portal.
+    assert!(
+        text(&o.stdout).contains("portal pages refreshed"),
+        "{}",
+        text(&o.stdout)
+    );
+    assert!(!home.data.path().join("portal").exists());
 
     assert_eq!(home.kit(&["catalog", "remove", "b"]).status.code(), Some(0));
     assert!(!home.data.path().join("catalogs/b").exists());
