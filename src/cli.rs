@@ -95,6 +95,8 @@ pub enum Command {
     DataDir(DataDirArgs),
     /// Catalog repositories: add, remove, update, order and check them
     Catalog(crate::cli_catalog::CatalogArgs),
+    /// Offline maps: the street and place search index
+    Maps(MapsArgs),
     /// Local HTTPS for kit.local and the services (CA, Caddy, hosts); every step is reversible
     Net(crate::cli_net::NetArgs),
 }
@@ -233,6 +235,27 @@ pub struct ArchiveArgs {
 
     #[arg(long, value_parser = clap::value_parser!(u16).range(1024..))]
     pub port: Option<u16>,
+}
+
+#[derive(Debug, Args)]
+pub struct MapsArgs {
+    #[command(subcommand)]
+    pub action: MapsAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MapsAction {
+    /// Build the street and place search of installed maps (`kit install` does this by itself;
+    /// use it to repeat it after an interruption or with --force)
+    Index {
+        /// Map package ids (default: every installed map)
+        ids: Vec<String>,
+        /// Rebuild even if the index belongs to this very map file
+        #[arg(long)]
+        force: bool,
+        #[arg(long, env = "KIT_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -419,6 +442,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::Status(args) => return status_cmd(args, env, out),
         Command::DataDir(args) => return data_dir_cmd(args, env, out),
         Command::Net(args) => return crate::cli_net::net_cmd(args, &catalog, env, out),
+        Command::Maps(args) => return maps_cmd(args, env, out),
         Command::Catalog(_) => unreachable!("handled before the catalog is loaded"),
     }
     Ok(Outcome::Ok)
@@ -1219,6 +1243,7 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
     }
     let any_installed = !guard.library_files().is_empty();
     drop(guard);
+    notes.extend(build_map_indexes(&ctx, &[], false, out)?);
     for n in &notes {
         writeln!(out, "note: {n}")?;
     }
@@ -1231,6 +1256,90 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
         )?;
     }
     Ok(Outcome::Ok)
+}
+
+/// The book name (file name without `.zim`) of an installed map package.
+fn map_book_of(r: &Record) -> Option<String> {
+    (r.kind == crate::catalog::PackageType::Zim && r.category.as_deref() == Some("maps"))
+        .then(|| r.files.first()?.name.strip_suffix(".zim").map(str::to_string))
+        .flatten()
+}
+
+/// Builds the search index of the installed maps (those named in `only`, or all) that lack one.
+/// A map works without it, so a failure is a note and not an error. Returns notes to show.
+fn build_map_indexes(ctx: &Ctx, only: &[String], force: bool, out: &mut dyn Write) -> Result<Vec<String>> {
+    // The lock is only held to look at the state, not while the index is built.
+    let maps: Vec<(String, String)> = {
+        let guard = StateGuard::open(&ctx.paths)?;
+        guard
+            .packages
+            .values()
+            .filter(|r| only.is_empty() || only.contains(&r.id))
+            .filter_map(|r| Some((r.id.clone(), map_book_of(r)?)))
+            .collect()
+    };
+    let (mut notes, mut built) = (Vec::new(), false);
+    for (id, book) in maps {
+        let zim = ctx.paths.library_dir().join(format!("{book}.zim"));
+        let dir = crate::mapsearch::index_dir(&ctx.paths.maps_dir(), &book);
+        if !force && crate::mapsearch::is_current(&dir, &zim) {
+            continue;
+        }
+        writeln!(
+            out,
+            "{id}: building the street and place search (this takes a while for a big country) ..."
+        )?;
+        out.flush()?;
+        let mut last = 0;
+        let result = crate::mapsearch::build(&zim, &dir, &mut |done, total| {
+            let pct = done * 100 / total.max(1);
+            if pct >= last + 10 || (pct == 100 && last < 100) {
+                last = pct - pct % 10;
+                let _ = writeln!(out, "{id}: search index {pct}%");
+            }
+        });
+        match result {
+            Ok(m) => {
+                built = true;
+                writeln!(out, "{id}: {} places and {} streets indexed", m.places, m.streets)?;
+            }
+            Err(e) => notes.push(format!(
+                "{id}: the search index could not be built ({e}); the map works without it"
+            )),
+        }
+    }
+    if built {
+        // The portal links the new index.
+        let guard = StateGuard::open(&ctx.paths)?;
+        install::reconcile::reconcile(ctx, &guard)?;
+    }
+    Ok(notes)
+}
+
+fn maps_cmd(args: &MapsArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
+    match &args.action {
+        MapsAction::Index { ids, force, data_dir } => {
+            let paths = paths_for(env, data_dir_of(data_dir)?)?;
+            let state = StateGuard::open(&paths)?;
+            let known: Vec<&str> = state
+                .packages
+                .values()
+                .filter_map(|r| map_book_of(r).map(|_| r.id.as_str()))
+                .collect();
+            if known.is_empty() {
+                bail!("no map is installed");
+            }
+            if let Some(bad) = ids.iter().find(|i| !known.contains(&i.as_str())) {
+                bail!("{bad} is not an installed map");
+            }
+            let ctx = make_ctx(env, &paths, state.port.unwrap_or(DEFAULT_PORT));
+            drop(state);
+            if let Some(note) = build_map_indexes(&ctx, ids, *force, out)?.into_iter().next() {
+                bail!("{note}");
+            }
+            Ok(Outcome::Ok)
+        }
+    }
 }
 
 fn archive_cmd(args: &ArchiveArgs, env: &Env, out: &mut dyn Write) -> Result<Outcome> {
@@ -1285,6 +1394,10 @@ fn uninstall_cmd(args: &UninstallArgs, env: &Env, out: &mut dyn Write) -> Result
             writeln!(out, "{id} is not installed")?;
             continue;
         };
+        // A map's search index goes with it (before the portal is rebuilt without the map).
+        if let Some(book) = guard.packages.get(id).and_then(map_book_of) {
+            let _ = std::fs::remove_dir_all(crate::mapsearch::index_dir(&paths.maps_dir(), &book));
+        }
         notes.extend(installer_for(kind)?.uninstall(id, &ctx, &mut guard, args.purge)?);
         writeln!(out, "uninstalled {id}")?;
     }

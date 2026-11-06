@@ -110,6 +110,10 @@ impl Paths {
     pub fn translate_dir(&self) -> PathBuf {
         self.data_dir.join("translate")
     }
+    /// Search indexes of the map books (`<book>.search/`); the portal links them next to the viewer.
+    pub fn maps_dir(&self) -> PathBuf {
+        self.data_dir.join("maps")
+    }
     pub fn quadlet_file(&self, id: &str) -> PathBuf {
         self.quadlet_dir.join(format!("kit-{id}.container"))
     }

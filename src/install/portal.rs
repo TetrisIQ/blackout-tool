@@ -463,18 +463,28 @@ fn map_books(state: &State) -> Vec<(String, String, String)> {
     books
 }
 
+/// Whether the street and place index of `book` has been built.
+fn has_search(paths: &Paths, book: &str) -> bool {
+    crate::mapsearch::read_meta(&crate::mapsearch::index_dir(&paths.maps_dir(), book)).is_some()
+}
+
 /// `regions.json` for the viewer: the installed map books. Tiles, style, fonts and the bounds
-/// all come from the book itself, served by the content server under `/content/<book>/`.
-fn render_regions(state: &State) -> String {
+/// all come from the book itself, served by the content server under `/content/<book>/`; the
+/// search index (if built) is linked under `/maps/search/<book>/`.
+fn render_regions(paths: &Paths, state: &State) -> String {
     let regions: Vec<_> = map_books(state)
         .into_iter()
-        .map(|(id, name, book)| serde_json::json!({ "id": id, "name": name, "book": book }))
+        .map(|(id, name, book)| {
+            let search = has_search(paths, &book).then(|| format!("/maps/search/{book}/"));
+            serde_json::json!({ "id": id, "name": name, "book": book, "search": search })
+        })
         .collect();
     serde_json::to_string_pretty(&regions).unwrap_or_else(|_| "[]".into())
 }
 
-/// The map viewer under `<portal>/maps/`: the page, the vendored scripts and `regions.json`.
-fn write_maps(state: &State, dir: &Path) -> Result<(), super::InstallError> {
+/// The map viewer under `<portal>/maps/`: the page, the vendored scripts, `regions.json` and one
+/// link per search index into `<data-dir>/maps/` (the front serves them as plain files).
+fn write_maps(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
     let maps = dir.join("maps");
     if map_books(state).is_empty() {
         return match fs::remove_dir_all(&maps) {
@@ -489,7 +499,19 @@ fn write_maps(state: &State, dir: &Path) -> Result<(), super::InstallError> {
     for (name, text) in VENDOR.iter().chain(std::iter::once(&VENDOR_BRIDGE)) {
         write_atomic(&vendor.join(name), text)?;
     }
-    write_atomic(&maps.join("regions.json"), &render_regions(state))
+    write_atomic(&maps.join("regions.json"), &render_regions(paths, state))?;
+    // Rebuild the links: drop stale ones, then point each existing index at the data directory.
+    let search = maps.join("search");
+    let _ = fs::remove_dir_all(&search);
+    for (_, _, book) in map_books(state) {
+        if has_search(paths, &book) {
+            fs::create_dir_all(&search).map_err(io_err("cannot create", &search))?;
+            let link = search.join(&book);
+            let target = crate::mapsearch::index_dir(&paths.maps_dir(), &book);
+            std::os::unix::fs::symlink(&target, &link).map_err(io_err("cannot link", &link))?;
+        }
+    }
+    Ok(())
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), super::InstallError> {
@@ -527,7 +549,7 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     write_atomic(&dir.join("installed.json"), &render_json(state))?;
     write_assistant(state, &dir)?;
     write_translate(paths, &dir)?;
-    write_maps(state, &dir)?;
+    write_maps(paths, state, &dir)?;
     write_games(paths, state, &dir)
 }
 
@@ -860,11 +882,13 @@ mod tests {
         let front = render_page(&st, Origin::Front { host: "kit.local" });
         assert!(front.contains("href=\"/read.html#/maps/\""), "{front}");
         assert!(!render_index(&st).contains("href=\"/maps/\""));
-        let regions = render_regions(&st);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path().join("data"), dir.path().join("units")).unwrap();
+        let regions = render_regions(&paths, &st);
         assert!(regions.contains("\"book\": \"maps_en_x_2026-06\""), "{regions}");
         assert!(regions.contains("\"name\": \"Map X\""), "{regions}");
-        let dir = tempfile::tempdir().unwrap();
-        write_maps(&st, dir.path()).unwrap();
+        assert!(regions.contains("\"search\": null"), "{regions}");
+        write_maps(&paths, &st, dir.path()).unwrap();
         let maps = dir.path().join("maps");
         for f in [
             "index.html",
@@ -875,9 +899,24 @@ mod tests {
         ] {
             assert!(maps.join(f).exists(), "{f}");
         }
+        assert!(!maps.join("search").exists());
+        // With a search index the viewer is told where it is and it is linked.
+        let index = crate::mapsearch::index_dir(&paths.maps_dir(), "maps_en_x_2026-06");
+        fs::create_dir_all(&index).unwrap();
+        let meta = crate::mapsearch::Meta {
+            version: crate::mapsearch::VERSION,
+            zim: "u".into(),
+            places: 0,
+            streets: 0,
+        };
+        fs::write(index.join("meta.json"), serde_json::to_string(&meta).unwrap()).unwrap();
+        fs::write(index.join("68-61.json"), "[]").unwrap();
+        assert!(render_regions(&paths, &st).contains("/maps/search/maps_en_x_2026-06/"));
+        write_maps(&paths, &st, dir.path()).unwrap();
+        assert!(maps.join("search/maps_en_x_2026-06/68-61.json").exists());
         // Without a map book the viewer is removed again; other ZIMs are not maps.
         st.packages.get_mut("maps_en_x").unwrap().category = Some("survival".into());
-        write_maps(&st, dir.path()).unwrap();
+        write_maps(&paths, &st, dir.path()).unwrap();
         assert!(!maps.exists());
     }
 

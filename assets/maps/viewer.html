@@ -21,6 +21,14 @@
   #pois { display: flex; gap: .25rem .9rem; flex-wrap: wrap; padding: 0 1rem .5rem; font-size: .95rem; }
   #pois label { display: inline-flex; gap: .3rem; align-items: center; cursor: pointer; }
   #pois i { width: .8rem; height: .8rem; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #0006; }
+  #find { position: relative; flex: 1 1 14rem; max-width: 26rem; }
+  #q { width: 100%; box-sizing: border-box; font-size: 1rem; padding: .3rem .6rem; }
+  #hits { position: absolute; z-index: 1000; left: 0; right: 0; top: 100%; margin: 0; padding: 0;
+          list-style: none; max-height: 50vh; overflow: auto; background: Canvas; color: CanvasText;
+          border: 1px solid GrayText; }
+  #hits li { padding: .35rem .6rem; cursor: pointer; }
+  #hits li:hover, #hits li.on { background: Highlight; color: HighlightText; }
+  #hits small { opacity: .75; }
   #map { flex: 1; min-height: 12rem; }
   #msg { padding: .5rem 1rem; }
   .leaflet-container { font: inherit; }
@@ -30,6 +38,8 @@
 <body>
 <header>
   <a href="/">Offline kit</a>
+  <div id="find"><input id="q" type="search" placeholder="Search a street or place" autocomplete="off" hidden>
+    <ul id="hits" hidden></ul></div>
   <label>Region <select id="region"></select></label>
   <button id="locate" type="button">My position</button>
 </header>
@@ -199,9 +209,94 @@
     gl.on('error', (e) => console.warn('map:', e.error && e.error.message));
     gl.once('load', () => addPois(gl));
   }
-  select.addEventListener('change', () => show(select.value));
+  select.addEventListener('change', () => { show(select.value); resetSearch(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => show(select.value));
   show(0);
+
+  // Street and place search. The index is split into small files by the first two letters of every
+  // word (see src/mapsearch.rs, which also defines `norm`); only the file of what is typed is read.
+  const q = document.getElementById('q'), hits = document.getElementById('hits');
+  const FOLD = { 'ø': 'o', 'ð': 'd', 'đ': 'd', 'ł': 'l', 'ħ': 'h', 'ŧ': 't', 'ı': 'i', 'ß': 'ss', 'æ': 'ae', 'œ': 'oe', 'þ': 'th' };
+  const norm = (t) => t.toLowerCase().replace(/[øðđłħŧıßæœþ]/g, (c) => FOLD[c])
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const shardFile = (word) => [...word].slice(0, 2).map((c) => c.codePointAt(0).toString(16)).join('-') + '.json';
+  const ZOOM = { country: 5, state: 6, province: 6, region: 8, county: 9, island: 10, city: 12, town: 13,
+                 village: 14, suburb: 14, quarter: 14, hamlet: 14, neighbourhood: 15 };
+  const shards = new Map();
+  let ticket = 0, current = -1, shown = [], found = null;
+
+  async function shard(file) {
+    const url = region.search + file;
+    if (!shards.has(url)) {
+      shards.set(url, fetch(url).then((r) => (r.ok ? r.json() : [])).catch(() => [])
+        .then((rows) => rows.map((r) => ({ name: r[0], lon: r[1], lat: r[2], kind: r[3], where: r[4], rank: r[5], key: norm(r[0] + ' ' + r[4]).split(' ') }))));
+    }
+    return shards.get(url);
+  }
+
+  function resetSearch() {
+    shards.clear(); ticket++; hits.hidden = true; q.value = '';
+    q.hidden = !(regions[select.value] && regions[select.value].search);
+  }
+
+  async function search() {
+    const mine = ++ticket;
+    const tokens = norm(q.value).split(' ').filter(Boolean);
+    // Read the file of the longest word first; a very common word ("rue") has no file of its own.
+    const leads = tokens.filter((t) => [...t].length >= 2).sort((a, b) => b.length - a.length);
+    if (!leads.length || !region.search) { hits.hidden = true; return; }
+    // Every typed word has to start a word of the name or of its locality ("grand rue ech").
+    shown = [];
+    for (const lead of leads) {
+      const rows = await shard(shardFile(lead));
+      if (mine !== ticket) return;                  // a newer keystroke is already on its way
+      for (const r of rows) {                       // rows are sorted: places biggest first, then streets
+        if (tokens.every((t) => r.key.some((w) => w.startsWith(t)))) shown.push(r);
+        if (shown.length >= 12) break;
+      }
+      if (shown.length) break;
+    }
+    hits.replaceChildren();
+    shown.forEach((r, i) => {
+      const li = document.createElement('li');
+      li.textContent = r.name + ' ';
+      const small = document.createElement('small');
+      small.textContent = [r.where, r.rank > 0 ? r.kind : 'street'].filter(Boolean).join(' \u00b7 ');
+      li.append(small);
+      li.addEventListener('click', () => pick(i));
+      hits.append(li);
+    });
+    current = -1;
+    hits.hidden = !shown.length;
+  }
+
+  function pick(i) {
+    const r = shown[i];
+    if (!r) return;
+    hits.hidden = true; q.value = r.name;
+    if (found) found.remove();
+    found = L.circleMarker([r.lat, r.lon], { radius: 9, color: '#d32f2f', weight: 3, fillOpacity: .25 }).addTo(map);
+    found.bindPopup(document.createTextNode(r.name + (r.where ? ', ' + r.where : ''))).openPopup();
+    map.setView([r.lat, r.lon], Math.min(r.rank > 0 ? ZOOM[r.kind] || 13 : 17, map.getMaxZoom()));
+  }
+
+  let timer = 0;
+  q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 120); });
+  q.addEventListener('keydown', (e) => {
+    const items = [...hits.children];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!items.length) return;
+      e.preventDefault();
+      current = (current + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items.forEach((li, i) => li.classList.toggle('on', i === current));
+    } else if (e.key === 'Enter' && shown.length) {
+      pick(current >= 0 ? current : 0);
+    } else if (e.key === 'Escape') {
+      hits.hidden = true;
+    }
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('#find')) hits.hidden = true; });
+  resetSearch();
 
   let marker = null;
   document.getElementById('locate').addEventListener('click', () => {

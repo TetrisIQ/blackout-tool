@@ -10,6 +10,7 @@ pub mod cli_net;
 pub mod datadir;
 pub mod diskspace;
 pub mod hw;
+pub mod mapsearch;
 pub mod plan;
 
 // Placeholders for later phases; each gets its content in the phase named in ROADMAP.md.
@@ -18,3 +19,4 @@ pub mod install;
 pub mod netcfg;
 pub mod services;
 pub mod ui;
+pub mod zimfile;

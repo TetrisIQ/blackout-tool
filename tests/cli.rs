@@ -65,3 +65,15 @@ fn list_and_show_work() {
     assert!(out.status.success());
     assert!(text(&out.stdout).contains("CC0-1.0"));
 }
+
+#[test]
+fn maps_index_without_a_map_is_a_clear_error() {
+    let data = tempfile::tempdir().unwrap();
+    let out = kit(&["maps", "index", "--data-dir", data.path().to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("no map is installed"),
+        "{}",
+        text(&out.stderr)
+    );
+}
