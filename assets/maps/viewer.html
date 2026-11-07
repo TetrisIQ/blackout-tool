@@ -199,6 +199,14 @@
     return m ? { lat: +m[1], lon: +m[2], zoom: m[3] ? +m[3] : 14 } : null;
   })();
   let pin = null;
+  // Inline SVG, so the pin needs no image files; the tip (bottom centre) sits on the point.
+  const PIN = L.divIcon({
+    className: '',
+    iconSize: [30, 42], iconAnchor: [15, 41],
+    html: '<svg xmlns="http://www.w3.org/2000/svg" width="30" height="42" viewBox="0 0 30 42">' +
+      '<path d="M15 1C7.3 1 1 7.2 1 14.8 1 25 15 41 15 41s14-16 14-26.2C29 7.2 22.7 1 15 1z" fill="#d32f2f" stroke="#fff" stroke-width="2"/>' +
+      '<circle cx="15" cy="15" r="5.5" fill="#fff"/></svg>',
+  });
 
   async function show(i, at) {
     region = regions[i];
@@ -215,7 +223,7 @@
     else if (box) map.fitBounds(box);
     else if (!map._loaded) map.setView([0, 0], 2);
     if (pin) pin.remove();
-    pin = at ? L.marker([at.lat, at.lon]).addTo(map) : null;
+    pin = at ? L.marker([at.lat, at.lon], { icon: PIN, keyboard: false }).addTo(map) : null;
     if (layer) map.removeLayer(layer);
     layer = L.maplibreGL({
       style,
