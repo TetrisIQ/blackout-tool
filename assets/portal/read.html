@@ -88,11 +88,42 @@ window.kitTranslatePairs = {{TRANSLATE_PAIRS}};
       d.documentElement.classList.toggle('kit-dark', dark);
     } catch (e) { frame.classList.remove('dark'); } // another origin (a service): its own look
   }
+  // Map links of an article (geo: URIs, Wikivoyage maplinks) open the offline map when an installed
+  // map covers the point; others stay as they are.
+  var regions = null;
+  function covers() {
+    if (!regions) {
+      regions = fetch('/maps/regions.json').then(function (r) { return r.json(); }).then(function (list) {
+        return Promise.all(list.map(function (r) {
+          return fetch('/content/' + encodeURIComponent(r.book) + '/content/config.json').then(function (x) { return x.json(); })
+            .then(function (c) { return c.boundingBox; }).catch(function () { return null; });
+        }));
+      }).catch(function () { return []; });
+    }
+    return regions;
+  }
+  function mapLinks(doc) {
+    var links = doc.querySelectorAll('a[href^="geo:"]');
+    if (!links.length) return;
+    covers().then(function (boxes) {
+      links.forEach(function (a) {
+        var m = /^geo:(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/.exec(a.getAttribute('href'));
+        if (!m) return;
+        var lat = +m[1], lon = +m[2];
+        var hit = boxes.some(function (b) { return b && lon >= b[0][0] && lat >= b[0][1] && lon <= b[1][0] && lat <= b[1][1]; });
+        if (!hit) return;
+        var z = a.getAttribute('data-zoom');
+        a.setAttribute('href', '/maps/#' + m[1] + ',' + m[2] + (/^\d+$/.test(z || '') ? ',' + z : ''));
+        a.removeAttribute('target');
+      });
+    });
+  }
   new MutationObserver(theme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   theme();
   frame.src = target();
   frame.addEventListener('load', function () {
     theme();
+    try { if (isArticle(frame.contentWindow.location.pathname)) mapLinks(frame.contentDocument); } catch (e) {}
     if (window.kitTranslate) kitTranslate.onLoad(frame, isArticle);
     try {
       var w = frame.contentWindow, l = w.location;

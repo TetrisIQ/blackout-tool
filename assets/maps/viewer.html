@@ -182,7 +182,25 @@
     L.popup().setLatLng([lat, lng]).setContent(el).openOn(map);
   });
 
-  async function show(i) {
+  // Bounds of a region as [[s, w], [n, e]], read once from the book.
+  const bounds = new Map();
+  function boundsOf(r) {
+    if (!bounds.has(r.book)) {
+      bounds.set(r.book, fetch('/content/' + encodeURIComponent(r.book) + '/content/config.json')
+        .then((x) => x.json()).then((c) => { const [[w, s], [e, n]] = c.boundingBox; return [[s, w], [n, e]]; })
+        .catch(() => null));
+    }
+    return bounds.get(r.book);
+  }
+
+  // A link from an article: `#<lat>,<lon>[,<zoom>]` shows that point with a pin.
+  const target = (() => {
+    const m = /^#(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,(\d+))?$/.exec(location.hash);
+    return m ? { lat: +m[1], lon: +m[2], zoom: m[3] ? +m[3] : 14 } : null;
+  })();
+  let pin = null;
+
+  async function show(i, at) {
     region = regions[i];
     msg.hidden = true;
     let style;
@@ -192,13 +210,12 @@
       return fail('The map ' + region.name + ' could not be read.');
     }
     // Leaflet creates the GL map only once the map has a view, so frame the region first.
-    try {
-      const c = await (await fetch('/content/' + encodeURIComponent(region.book) + '/content/config.json')).json();
-      const [[w, s], [e, n]] = c.boundingBox;
-      map.fitBounds([[s, w], [n, e]]);
-    } catch (e) {
-      if (!map._loaded) map.setView([0, 0], 2);
-    }
+    const box = await boundsOf(region);
+    if (at) map.setView([at.lat, at.lon], Math.min(at.zoom, map.getMaxZoom()));
+    else if (box) map.fitBounds(box);
+    else if (!map._loaded) map.setView([0, 0], 2);
+    if (pin) pin.remove();
+    pin = at ? L.marker([at.lat, at.lon]).addTo(map) : null;
     if (layer) map.removeLayer(layer);
     layer = L.maplibreGL({
       style,
@@ -211,7 +228,17 @@
   }
   select.addEventListener('change', () => { show(select.value); resetSearch(); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => show(select.value));
-  show(0);
+  (async () => {
+    let first = 0;
+    if (target) {
+      for (let i = 0; i < regions.length; i++) {
+        const b = await boundsOf(regions[i]);
+        if (b && target.lat >= b[0][0] && target.lat <= b[1][0] && target.lon >= b[0][1] && target.lon <= b[1][1]) { first = i; break; }
+      }
+      select.value = first;
+    }
+    show(first, target);
+  })();
 
   // Street and place search. The index is split into small files by the first two letters of every
   // word (see src/mapsearch.rs, which also defines `norm`); only the file of what is typed is read.
