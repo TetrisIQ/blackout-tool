@@ -389,3 +389,9 @@ Found by the first real install of the test profile: no login, no library.
 - `kit catalog update` also rewrites the portal pages from the installed state (`cli_catalog::refresh_portal`, no service is touched), so a newer `kit` shows its new pages (e.g. the game library) without reinstalling. The window's **Catalogs…** update runs the same command, so CLI and window behave the same.
 - The portal's **Games** tile opens `/games/` directly instead of the reading frame: a frame cannot offer "Install as app". The hub has a "Back to Blackout" link instead (hidden in the installed app). Games from older releases with `game.yaml` are read like `game.yml`.
 - The back link of the hub leaves the reading frame (`target="_top"`), and `read.html` unwraps itself when it ends up inside its own frame (`/read.html#/read.html#/games/` from an old cached page). The games repository publishes the same hub on GitHub Pages (`tools/build-site.mjs`, workflow `pages.yml`).
+
+## Map links in articles
+- Map links of an article (`geo:` URIs, e.g. the Kartographer maplinks of Wikivoyage) open the offline map in the same reading frame when an installed map covers the point; other links stay as they are. `read.html` rewrites them after the frame has loaded (articles only), using the `boundingBox` of each map's `content/config.json`.
+- The viewer (`/maps/`) reads `#<lat>,<lon>[,<zoom>]`, picks the region whose bounding box contains the point, centres on it and sets one pin. Without a hash it behaves as before. A maplink with several places jumps to its centre only (no pins for the other listings).
+- Only whole-country maps exist (`maps_en_<country>`), so many articles get no map link. GeoHack links of Wikipedia are not handled yet.
+- Browser-only; CLI and window need no change. Checked in the browser against the Wikivoyage article "Luxembourg" and the Luxembourg map. A newer `kit` shows this after `kit catalog update` (portal rewrite).
