@@ -97,6 +97,8 @@ pub enum Command {
     Catalog(crate::cli_catalog::CatalogArgs),
     /// Offline maps: the street and place search index
     Maps(MapsArgs),
+    /// "Did you mean ...?" for the search: an optional word index per ZIM, in levels of effort
+    Spell(crate::cli_spell::SpellArgs),
     /// Local HTTPS for kit.local and the services (CA, Caddy, hosts); every step is reversible
     Net(crate::cli_net::NetArgs),
 }
@@ -427,6 +429,9 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
     if let Command::Catalog(args) = &cli.command {
         return crate::cli_catalog::catalog_cmd(args, env, cli.offline, out);
     }
+    if let Command::Spell(args) = &cli.command {
+        return crate::cli_spell::spell_cmd(args, env, out);
+    }
     let catalog = crate::cli_catalog::load_catalog(cli.catalog.as_deref(), env, cli.offline)?;
     match &cli.command {
         Command::List { category, json } => list(&catalog, category.as_deref(), *json, out)?,
@@ -443,7 +448,7 @@ pub fn run_with(cli: &Cli, out: &mut dyn Write, env: &Env) -> Result<Outcome> {
         Command::DataDir(args) => return data_dir_cmd(args, env, out),
         Command::Net(args) => return crate::cli_net::net_cmd(args, &catalog, env, out),
         Command::Maps(args) => return maps_cmd(args, env, out),
-        Command::Catalog(_) => unreachable!("handled before the catalog is loaded"),
+        Command::Catalog(_) | Command::Spell(_) => unreachable!("handled before the catalog is loaded"),
     }
     Ok(Outcome::Ok)
 }
@@ -1041,7 +1046,7 @@ fn download_cmd(catalog: &Catalog, args: &DownloadArgs, env: &Env, out: &mut dyn
     }
 }
 
-fn make_ctx<'a>(env: &'a Env, paths: &Paths, port: u16) -> Ctx<'a> {
+pub(crate) fn make_ctx<'a>(env: &'a Env, paths: &Paths, port: u16) -> Ctx<'a> {
     Ctx {
         paths: paths.clone(),
         runner: env.runner,
@@ -1244,6 +1249,8 @@ fn install_cmd(catalog: &Catalog, args: &InstallArgs, env: &Env, out: &mut dyn W
     let any_installed = !guard.library_files().is_empty();
     drop(guard);
     notes.extend(build_map_indexes(&ctx, &[], false, out)?);
+    // Only the packages that were switched on (`kit spell enable`), and only when stale.
+    notes.extend(crate::cli_spell::build_indexes(&ctx, &[], false, out)?);
     for n in &notes {
         writeln!(out, "note: {n}")?;
     }
@@ -1397,6 +1404,10 @@ fn uninstall_cmd(args: &UninstallArgs, env: &Env, out: &mut dyn Write) -> Result
         // A map's search index goes with it (before the portal is rebuilt without the map).
         if let Some(book) = guard.packages.get(id).and_then(map_book_of) {
             let _ = std::fs::remove_dir_all(crate::mapsearch::index_dir(&paths.maps_dir(), &book));
+        }
+        // The spelling index and its setting go with the package.
+        if let Some(book) = guard.packages.get(id).and_then(crate::spell::book_of) {
+            crate::cli_spell::forget(&paths, id, &book);
         }
         notes.extend(installer_for(kind)?.uninstall(id, &ctx, &mut guard, args.purge)?);
         writeln!(out, "uninstalled {id}")?;

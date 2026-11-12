@@ -309,6 +309,38 @@ pub fn catalog_action(cfg: &Config, args: &[String]) -> Result<String, String> {
     }
 }
 
+/// `kit spell list --json`: the installed ZIMs with their level, index and the estimates per level.
+pub fn spell_rows(cfg: &Config) -> Result<Vec<crate::cli_spell::Row>, String> {
+    let out = cfg
+        .command(true)
+        .args(["spell", "list", "--json", "--data-dir"])
+        .arg(&cfg.data_dir)
+        .output()
+        .map_err(|e| format!("Could not run kit: {e}"))?;
+    if !out.status.success() {
+        return Err(first_error_line(&out.stderr));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("Unexpected answer from kit: {e}"))
+}
+
+/// Runs one `kit spell <args>` (`enable ... --level ...` builds the index, which can take a long
+/// time for a big ZIM) and returns what it printed, or its error message.
+pub fn spell_action(cfg: &Config, args: &[String]) -> Result<String, String> {
+    let out = cfg
+        .command(true)
+        .arg("spell")
+        .args(args)
+        .arg("--data-dir")
+        .arg(&cfg.data_dir)
+        .output()
+        .map_err(|e| format!("Could not run kit: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(first_error_line(&out.stderr))
+    }
+}
+
 fn first_error_line(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
     text.lines()

@@ -318,6 +318,7 @@ pub fn render_results(state: &State) -> String {
             ("CSS", CSS),
             ("THEME_JS", THEME_JS),
             ("COMMON_JS", COMMON_JS),
+            ("SPELL_JS", SPELL_JS),
             ("LAUNCHER", &tiles),
             ("LAUNCHER_HIDDEN", if tiles.is_empty() { " hidden" } else { "" }),
             ("PROVIDERS", &render_providers(state)),
@@ -398,6 +399,7 @@ pub fn render_json(state: &State) -> String {
 
 const ASSISTANT: &str = include_str!("../../assets/ai/chat.html");
 const ASSISTANT_JS: &str = include_str!("../../assets/ai/rag.js");
+const SPELL_JS: &str = include_str!("../../assets/portal/spell.js");
 
 /// The assistant page under `<portal>/ai/`, or nothing when no language model is installed.
 fn write_assistant(state: &State, dir: &Path) -> Result<(), super::InstallError> {
@@ -412,6 +414,7 @@ fn write_assistant(state: &State, dir: &Path) -> Result<(), super::InstallError>
     fs::create_dir_all(&ai).map_err(io_err("cannot create", &ai))?;
     write_atomic(&ai.join("index.html"), ASSISTANT)?;
     write_atomic(&ai.join("rag.js"), ASSISTANT_JS)?;
+    write_atomic(&ai.join("spell.js"), SPELL_JS)?;
     write_atomic(
         &ai.join("config.json"),
         &serde_json::json!({
@@ -554,7 +557,47 @@ pub fn write(paths: &Paths, state: &State) -> Result<(), super::InstallError> {
     write_assistant(state, &dir)?;
     write_translate(paths, &dir)?;
     write_maps(paths, state, &dir)?;
+    write_spell(paths, state, &dir)?;
     write_games(paths, state, &dir)
+}
+
+/// The spelling indexes ("did you mean", see `spell`) under `<portal>/spell/`: `books.json` lists
+/// the installed books that have one, and each index is linked into `<data-dir>/spell/` (the front
+/// serves it as plain files). Removed when there is none.
+fn write_spell(paths: &Paths, state: &State, dir: &Path) -> Result<(), super::InstallError> {
+    let mut books: Vec<(String, crate::spell::Meta)> = state
+        .packages
+        .values()
+        .filter_map(crate::spell::book_of)
+        .filter_map(|book| {
+            let meta = crate::spell::read_meta(&crate::spell::index_dir(&paths.spell_dir(), &book))?;
+            (meta.version == crate::spell::VERSION).then_some((book, meta))
+        })
+        .collect();
+    books.sort_by(|a, b| a.0.cmp(&b.0));
+    let spell = dir.join("spell");
+    match fs::remove_dir_all(&spell) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(io_err("cannot remove", &spell)(e)),
+    }
+    if books.is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(&spell).map_err(io_err("cannot create", &spell))?;
+    for (book, _) in &books {
+        let link = spell.join(book);
+        let target = crate::spell::index_dir(&paths.spell_dir(), book);
+        std::os::unix::fs::symlink(&target, &link).map_err(io_err("cannot link", &link))?;
+    }
+    let list: Vec<_> = books
+        .iter()
+        .map(|(book, m)| serde_json::json!({ "book": book, "level": m.level, "words": m.words }))
+        .collect();
+    write_atomic(
+        &spell.join("books.json"),
+        &serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()),
+    )
 }
 
 const GAMES_HUB: &str = include_str!("../../assets/games/hub.html");
@@ -947,6 +990,53 @@ mod tests {
             !p.portal_dir().join("games").exists(),
             "hub goes with the last game"
         );
+    }
+
+    #[test]
+    fn spelling_indexes_are_linked_and_listed_when_built() {
+        let d = tempfile::tempdir().unwrap();
+        let p = Paths::new(d.path().join("data"), d.path().join("u")).unwrap();
+        let mut st = State::default();
+        st.packages
+            .insert("wv".into(), sample_record("wv", "wikivoyage_en.zim", 1));
+        write(&p, &st).unwrap();
+        assert!(!p.portal_dir().join("spell").exists(), "no index, no folder");
+
+        let dir = crate::spell::index_dir(&p.spell_dir(), "wikivoyage_en");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("w7.tsv"), "tornado\t3\n").unwrap();
+        let meta = crate::spell::Meta {
+            version: crate::spell::VERSION,
+            zim: "u".into(),
+            level: crate::spell::Level::Sample,
+            words: 1,
+            bytes: 12,
+            secs: 1,
+        };
+        fs::write(
+            dir.join(crate::spell::META_FILE),
+            serde_json::to_vec(&meta).unwrap(),
+        )
+        .unwrap();
+        write(&p, &st).unwrap();
+        let spell = p.portal_dir().join("spell");
+        assert_eq!(
+            fs::read_to_string(spell.join("wikivoyage_en/w7.tsv")).unwrap(),
+            "tornado\t3\n",
+            "served through the link"
+        );
+        let books: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(spell.join("books.json")).unwrap()).unwrap();
+        assert_eq!(books[0]["book"], "wikivoyage_en");
+        assert_eq!(books[0]["level"], "sample");
+
+        // The result page and the assistant carry the script; a package that is gone drops its index.
+        assert!(render_results(&st).contains("window.Spell") || render_results(&st).contains("root.Spell"));
+        st.packages.clear();
+        st.packages
+            .insert("other".into(), sample_record("other", "other.zim", 1));
+        write(&p, &st).unwrap();
+        assert!(!spell.exists());
     }
 
     #[test]

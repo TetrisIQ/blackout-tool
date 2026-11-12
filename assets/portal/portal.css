@@ -128,3 +128,6 @@ dialog.providers .sum { margin-right: auto; font-size: 13px; color: var(--color-
 .tbtn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--color-divider); border-radius: 999px; background: none; font: inherit; font-size: 12px; color: var(--color-neutral-700); cursor: pointer; }
 .tbtn:hover, .tbtn.on { color: var(--color-accent-700); }
 .tbtn[hidden] { display: none; }
+
+.dym { padding: var(--space-3) 0 0; font-size: 16px; }
+.dym a { font-weight: 600; }

@@ -122,17 +122,37 @@ impl ZimFile {
         }
     }
 
+    pub fn entry_count(&self) -> u32 {
+        self.entry_count
+    }
+
     pub fn cluster_count(&self) -> u32 {
         self.cluster_count
     }
 
     /// Content entries (namespace `C`, no redirects) whose path `keep` accepts.
     pub fn entries(&self, mut keep: impl FnMut(&str) -> bool) -> Result<Vec<Entry>, ZimError> {
+        let mut out = Vec::new();
+        self.visit(|path, _, cluster, blob| {
+            if keep(path) {
+                out.push(Entry {
+                    path: path.to_string(),
+                    cluster,
+                    blob,
+                });
+            }
+        })?;
+        Ok(out)
+    }
+
+    /// Calls `f(path, title, cluster, blob)` for every content entry (namespace `C`, no redirects)
+    /// without keeping them, so a ZIM with millions of articles needs no memory for the list.
+    /// `title` is empty for resources such as stylesheets and images.
+    pub fn visit(&self, mut f: impl FnMut(&str, &str, u32, u32)) -> Result<(), ZimError> {
         let mut ptrs = vec![0u8; self.entry_count as usize * 8];
         self.file
             .read_exact_at(&mut ptrs, self.url_ptr_pos)
             .map_err(|e| self.io(e))?;
-        let mut out = Vec::new();
         let mut buf = vec![0u8; DIRENT_READ];
         for p in ptrs.as_chunks::<8>().0 {
             let pos = u64::from_le_bytes(*p);
@@ -151,15 +171,15 @@ impl ZimFile {
             let Ok(path) = std::str::from_utf8(&rest[..end]) else {
                 continue;
             };
-            if keep(path) {
-                out.push(Entry {
-                    path: path.to_string(),
-                    cluster,
-                    blob,
-                });
-            }
+            let after = rest.get(end + 1..).unwrap_or_default();
+            let title = after
+                .iter()
+                .position(|b| *b == 0)
+                .and_then(|t| std::str::from_utf8(&after[..t]).ok())
+                .unwrap_or("");
+            f(path, title, cluster, blob);
         }
-        Ok(out)
+        Ok(())
     }
 
     /// Reads as much as is there, up to `buf.len()` (the last entries sit near the end of the file).
@@ -182,6 +202,20 @@ impl ZimFile {
             .read_exact_at(&mut b, self.cluster_ptr_pos + u64::from(n) * 8)
             .map_err(|e| self.io(e))?;
         Ok(u64::from_le_bytes(b))
+    }
+
+    /// The stored (compressed) size of cluster `n` in bytes.
+    pub fn cluster_bytes(&self, n: u32) -> Result<u64, ZimError> {
+        if n >= self.cluster_count {
+            return Err(self.bad("an entry points past the last cluster"));
+        }
+        let start = self.cluster_ptr(n)?;
+        let end = if n + 1 < self.cluster_count {
+            self.cluster_ptr(n + 1)?
+        } else {
+            self.checksum_pos
+        };
+        Ok(end.saturating_sub(start))
     }
 
     /// Reads and unpacks one cluster.

@@ -49,6 +49,7 @@
   <button id="go" type="submit">Ask</button>
 </form>
 <script src="rag.js"></script>
+<script src="spell.js"></script>
 <script>
 (async () => {
   const log = document.getElementById('log');
@@ -99,6 +100,15 @@
   }
 
   // `query` is the English keyword string: the library is English, the question may not be.
+  // Misspelt words (`kit spell` builds the word index; without it nothing is corrected).
+  const speller = Spell.create(async (url) => {
+    try {
+      const r = await fetch(url);
+      return r.ok ? await r.text() : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const passages = (query, question) => Rag.retrieve(query, async (url) => (await fetch(url)).text(), books, { question });
 
   form.addEventListener('submit', async (ev) => {
@@ -123,7 +133,26 @@
     log.append(turn);
     try {
       const query = await keywords(question);
-      const { found, used } = await passages(query, question);
+      let { found, used } = await passages(query, question);
+      if (found.length === 0) {
+        // Nothing found: perhaps a typo, in the question or in what the model made of it. Try again with the
+        // corrected words and say so.
+        const [fq, fqu] = await Promise.all([speller.suggest(query), speller.suggest(question)]);
+        if (fq || fqu) {
+          status.textContent = 'Nothing found, trying the corrected spelling ...';
+          const again = await passages(fq ? fq.text : query, fqu ? fqu.text : question);
+          if (again.found.length > 0) {
+            ({ found, used } = again);
+            const fixes = [...(fq ? fq.changes : []), ...(fqu ? fqu.changes : [])];
+            turn.insertBefore(
+              el('div', 'status', 'Searched with corrected spelling: ' +
+                [...new Set(fixes.map((c) => c.from + ' \u2192 ' + c.to))].join(', ')),
+              answer);
+          } else {
+            used = again.used;
+          }
+        }
+      }
       tSearch = performance.now();
       if (found.length === 0) {
         status.textContent = '';

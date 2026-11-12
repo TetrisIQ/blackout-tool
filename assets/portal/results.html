@@ -48,9 +48,11 @@
 <script>
 {{COMMON_JS}}</script>
 <script>
+{{SPELL_JS}}</script>
+<script>
 (function () {
   var PAGE = 40, q = new URLSearchParams(location.search).get('q') || '';
-  var items = [], total = 0, filter = '', loading = false, failed = false;
+  var items = [], total = 0, filter = '', loading = false, failed = false, didYouMean = null;
   var input = document.getElementById('q'), list = document.getElementById('list'), count = document.getElementById('count');
   var tabs = document.getElementById('tabs'), tabbtns = document.getElementById('tabbtns');
   input.value = q; document.title = (q ? q + ' - ' : '') + 'Search - Blackout';
@@ -105,6 +107,11 @@
       list.appendChild(a);
     });
     if (!shown.length && !failed) {
+      if (didYouMean && !filter) {
+        var d = el('div', 'dym', 'Did you mean: '), l = el('a', null, didYouMean.text);
+        l.href = '/results.html?q=' + encodeURIComponent(didYouMean.text); d.appendChild(l); d.appendChild(document.createTextNode('?'));
+        list.appendChild(d);
+      }
       var e = el('div', 'empty'); e.appendChild(el('div', 't', 'Nothing ' + (filter ? 'in ' + filter + ' ' : '') + 'for “' + q + '”'));
       if (filter) { var b = el('button', 'btn', 'Show all results'); b.type = 'button'; b.onclick = function () { filter = ''; render(); }; e.appendChild(b); }
       list.appendChild(e);
@@ -119,7 +126,14 @@
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then(parse)
       .catch(function () { total = items.length; failed = true; })
-      .then(function () { loading = false; render(); });
+      .then(function () { loading = false; render(); })
+      .then(suggest);
+  }
+  // Nothing found: look for a misspelt word in the word index (`kit spell`), if there is one.
+  function suggest() {
+    if (items.length || failed || didYouMean || typeof Spell === 'undefined') return;
+    Spell.create(function (u) { return fetch(u).then(function (r) { return r.ok ? r.text() : null; }); })
+      .suggest(q).then(function (s) { if (s) { didYouMean = s; render(); } }, function () {});
   }
   if (q.trim()) load(); else { count.textContent = 'Type something to search.'; input.focus(); }
 })();

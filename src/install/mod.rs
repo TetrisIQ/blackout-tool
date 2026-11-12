@@ -115,6 +115,10 @@ impl Paths {
     pub fn maps_dir(&self) -> PathBuf {
         self.data_dir.join("maps")
     }
+    /// Spelling index ("did you mean") per ZIM book, `<book>/`, and `settings.json` with the levels.
+    pub fn spell_dir(&self) -> PathBuf {
+        self.data_dir.join("spell")
+    }
     pub fn quadlet_file(&self, id: &str) -> PathBuf {
         self.quadlet_dir.join(format!("kit-{id}.container"))
     }

@@ -7,11 +7,13 @@ pub mod catalog;
 pub mod cli;
 pub mod cli_catalog;
 pub mod cli_net;
+pub mod cli_spell;
 pub mod datadir;
 pub mod diskspace;
 pub mod hw;
 pub mod mapsearch;
 pub mod plan;
+pub mod spell;
 
 // Placeholders for later phases; each gets its content in the phase named in ROADMAP.md.
 pub mod download;

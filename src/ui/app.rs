@@ -28,6 +28,7 @@ enum Tab {
     Installed,
     Updates,
     Services,
+    Search,
 }
 
 enum Msg {
@@ -42,6 +43,9 @@ enum Msg {
     CatalogRows(Result<Vec<crate::cli_catalog::Row>, String>),
     /// A `kit catalog` action finished: what it printed, or why it failed.
     CatalogDone(Result<String, String>),
+    SpellRows(Result<Vec<crate::cli_spell::Row>, String>),
+    /// A `kit spell` action finished: what it printed, or why it failed.
+    SpellDone(Result<String, String>),
 }
 
 struct Wiz {
@@ -98,6 +102,8 @@ pub struct App {
     archive: Option<ArchiveDialog>,
     /// The "Catalogs" dialog.
     catalogs: Option<CatalogDialog>,
+    /// The "Search index" dialog.
+    spell: Option<SpellDialog>,
     done: Vec<(String, bool, Instant)>,
     failures: Vec<String>,
     online: bool,
@@ -131,6 +137,16 @@ struct CatalogDialog {
     note: Option<(bool, String)>,
 }
 
+struct SpellDialog {
+    /// `None` while `kit spell list` is still reading the ZIM files.
+    rows: Option<Vec<crate::cli_spell::Row>>,
+    /// The level picked per package id (`None`: off); defaults to what is set.
+    choice: HashMap<String, Option<crate::spell::Level>>,
+    /// The package a `kit spell` command is working on.
+    busy: Option<String>,
+    note: Option<(bool, String)>,
+}
+
 struct Location {
     text: String,
     move_data: bool,
@@ -138,7 +154,7 @@ struct Location {
 }
 
 /// Developer aid: `KIT_GUI_SHOT=file.ppm` saves the window after a few seconds and quits;
-/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location|archive|catalogs` picks the page.
+/// `KIT_GUI_TAB=downloads|installed|updates|services|wizard|location|archive|catalogs|spell` picks the page.
 struct Snapshot {
     path: std::path::PathBuf,
     frames: u32,
@@ -163,6 +179,7 @@ impl App {
             loc: None,
             archive: None,
             catalogs: None,
+            spell: None,
             done: Vec::new(),
             failures: Vec::new(),
             online: true,
@@ -186,8 +203,12 @@ impl App {
             Ok("installed") => Tab::Installed,
             Ok("updates") => Tab::Updates,
             Ok("services") => Tab::Services,
+            Ok("spell") => Tab::Search,
             _ => Tab::Library,
         };
+        if app.tab == Tab::Search {
+            app.open_spell(&cc.egui_ctx);
+        }
         app.spawn_load(&cc.egui_ctx, true);
         app.spawn_online_probe(&cc.egui_ctx);
         app
@@ -208,6 +229,37 @@ impl App {
         let (cfg, tx, ctx) = (self.cfg.clone(), self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
             let _ = tx.send(Msg::CatalogRows(backend::catalog_rows(&cfg)));
+            ctx.request_repaint();
+        });
+    }
+
+    fn spawn_spell_rows(&self, ctx: &egui::Context) {
+        let (cfg, tx, ctx) = (self.cfg.clone(), self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::SpellRows(backend::spell_rows(&cfg)));
+            ctx.request_repaint();
+        });
+    }
+
+    fn open_spell(&mut self, ctx: &egui::Context) {
+        self.spell = Some(SpellDialog {
+            rows: None,
+            choice: HashMap::new(),
+            busy: None,
+            note: None,
+        });
+        self.spawn_spell_rows(ctx);
+    }
+
+    /// Runs `kit spell <args>` off the UI thread; the answer comes back as `Msg::SpellDone`.
+    fn run_spell(&mut self, ctx: &egui::Context, id: String, args: Vec<String>) {
+        if let Some(d) = &mut self.spell {
+            d.busy = Some(id);
+            d.note = None;
+        }
+        let (cfg, tx, ctx) = (self.cfg.clone(), self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::SpellDone(backend::spell_action(&cfg, &args)));
             ctx.request_repaint();
         });
     }
@@ -359,6 +411,34 @@ impl App {
                         self.spawn_load(ctx, !self.online);
                     }
                 }
+                Msg::SpellRows(rows) => {
+                    if let Some(d) = &mut self.spell {
+                        match rows {
+                            Ok(r) => {
+                                // What is set now wins: the page may have re-filled `choice` from the old rows.
+                                for row in &r {
+                                    d.choice.insert(row.id.clone(), row.level);
+                                }
+                                d.rows = Some(r);
+                            }
+                            Err(e) => {
+                                d.rows = Some(Vec::new());
+                                d.note = Some((true, e));
+                            }
+                        }
+                    }
+                }
+                Msg::SpellDone(result) => {
+                    if let Some(d) = &mut self.spell {
+                        d.busy = None;
+                        d.choice.clear();
+                        d.note = Some(match result {
+                            Ok(t) => (false, t.lines().last().unwrap_or("Done.").to_string()),
+                            Err(e) => (true, e),
+                        });
+                    }
+                    self.spawn_spell_rows(ctx);
+                }
                 Msg::Restarted(unit) => {
                     self.restarting.remove(&unit);
                     self.spawn_active(ctx);
@@ -410,7 +490,12 @@ impl App {
     fn act(&mut self, ctx: &egui::Context, a: Act) {
         let queued: HashSet<String> = self.runner.jobs.iter().map(|j| j.id.clone()).collect();
         match a {
-            Act::Tab(t) => self.tab = t,
+            Act::Tab(t) => {
+                self.tab = t;
+                if t == Tab::Search && self.spell.is_none() {
+                    self.open_spell(ctx);
+                }
+            }
             Act::ToggleCat(c) => {
                 if !self.collapsed.remove(&c) {
                     self.collapsed.insert(c);
@@ -685,6 +770,7 @@ impl eframe::App for App {
                     Tab::Installed => self.installed_tab(ui, &mut acts),
                     Tab::Updates => self.updates(ui, &mut acts),
                     Tab::Services => self.services_tab(ui, &mut acts),
+                    Tab::Search => self.spell_tab(ui),
                 }
             });
         self.wizard(&ctx);
@@ -706,6 +792,7 @@ enum Icon {
     Download,
     Refresh,
     Server,
+    Search,
     Play,
     Pause,
     Check,
@@ -760,6 +847,10 @@ fn paint_icon(ui: &Ui, icon: Icon, center: Pos2, color: Color32) {
                 );
                 p.circle_filled(at(-4.0, y + 2.75), 0.9, color);
             }
+        }
+        Icon::Search => {
+            p.circle_stroke(at(-1.5, -1.5), 4.5, s);
+            p.line_segment([at(1.8, 1.8), at(6.5, 6.5)], s);
         }
         Icon::Play => {
             p.add(egui::Shape::convex_polygon(
@@ -946,6 +1037,7 @@ impl App {
             Tab::Installed => "Installed",
             Tab::Updates => "Updates",
             Tab::Services => "Services",
+            Tab::Search => "Search index",
         };
         egui::Panel::top("header")
             .exact_size(46.0)
@@ -996,6 +1088,7 @@ impl App {
                     (Tab::Installed, "Installed", Icon::Check, installed),
                     (Tab::Updates, "Updates", Icon::Refresh, ups),
                     (Tab::Services, "Services", Icon::Server, 0),
+                    (Tab::Search, "Search index", Icon::Search, 0),
                 ];
                 for (tab, label, icon, badge) in items {
                     let (rect, resp) =
@@ -2422,6 +2515,126 @@ impl App {
         }
         if close {
             self.catalogs = None;
+        }
+    }
+
+    /// "Did you mean" for the search: per installed ZIM a level (off, titles, sample, full) with the
+    /// estimated time and disk space of each. The work is `kit spell ...`, so the window stays responsive.
+    fn spell_tab(&mut self, ui: &mut Ui) {
+        use crate::spell::Level;
+        let Some(d) = &mut self.spell else {
+            return;
+        };
+        let mut run: Option<(String, Vec<String>)> = None;
+        {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+            ui.add_space(8.0);
+            ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                Frame::new().inner_margin(Margin { left: 20, right: 20, top: 8, bottom: 24 }).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(theme::small(
+                        "Adds \u{201c}Did you mean\u{2026}?\u{201d} to the search and makes the assistant find articles \
+                         despite typos. Per ZIM file you pick how much is read: titles only (fast), titles and a sample \
+                         of the text, or everything (slowest, most words). The estimates are rough; big files with a \
+                         slow disk take longer.",
+                        N700,
+                    ));
+                    let busy = d.busy.clone();
+                    match &d.rows {
+                        None => {
+                            ui.label(theme::small("Reading the ZIM files\u{2026}", N700));
+                        }
+                        Some(rows) if rows.is_empty() && d.note.is_none() => {
+                            ui.label(theme::small("No ZIM file is installed.", N700));
+                        }
+                        Some(rows) => {
+                            ui.scope(|ui| {
+                                for r in rows {
+                                    let picked = *d.choice.entry(r.id.clone()).or_insert(r.level);
+                                    ui.separator();
+                                    ui.horizontal(|ui| {
+                                        ui.label(theme::small(format!("{} \u{b7} {}", r.name, fmt_size(r.zim_bytes)), TEXT));
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            let state = match (&r.index, r.level, r.current) {
+                                                (Some(m), Some(_), true) => {
+                                                    format!("{} words, {}", m.words, fmt_size(m.bytes))
+                                                }
+                                                (Some(_), Some(_), false) => "outdated".into(),
+                                                (None, Some(_), _) => "not built".into(),
+                                                (Some(_), None, _) => "unused".into(),
+                                                (None, None, _) => "off".into(),
+                                            };
+                                            ui.label(theme::small(state, N700));
+                                        });
+                                    });
+                                    ui.horizontal(|ui| {
+                                        let free = busy.is_none();
+                                        for (label, value) in [
+                                            ("Off", None),
+                                            ("Titles", Some(Level::Titles)),
+                                            ("Sample", Some(Level::Sample)),
+                                            ("Full", Some(Level::Full)),
+                                        ] {
+                                            let resp = ui
+                                                .add_enabled_ui(free, |ui| ui.selectable_label(picked == value, label))
+                                                .inner;
+                                            if resp
+                                                .on_hover_text(value.map_or("Delete the index", Level::describe))
+                                                .clicked()
+                                            {
+                                                d.choice.insert(r.id.clone(), value);
+                                            }
+                                        }
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            let changed = picked != r.level || (picked.is_some() && !r.current);
+                                            if button(ui, "Apply", BtnKind::Secondary, free && changed) {
+                                                let args = match picked {
+                                                    Some(l) => vec![
+                                                        "enable".to_string(),
+                                                        r.id.clone(),
+                                                        "--level".into(),
+                                                        l.name().into(),
+                                                    ],
+                                                    None => vec!["disable".to_string(), r.id.clone()],
+                                                };
+                                                run = Some((r.id.clone(), args));
+                                            }
+                                        });
+                                    });
+                                    {
+                                        let info = match picked {
+                                            None => "Deletes the index".to_string(),
+                                            Some(l) => match r.estimates.iter().find(|e| e.level == l) {
+                                                _ if r.current && r.level == Some(l) => "Built".to_string(),
+                                                Some(e) => format!(
+                                                    "about {}, {} disk",
+                                                    crate::cli_spell::fmt_secs(e.estimate.secs),
+                                                    fmt_size(e.estimate.bytes)
+                                                ),
+                                                None => r.error.clone().unwrap_or_else(|| "no estimate".into()),
+                                            },
+                                        };
+                                        ui.label(theme::small(info, N800));
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    if let Some(id) = &d.busy {
+                        ui.label(theme::small(
+                            format!("Working on {id}\u{2026} a big ZIM can take a while; you can close this window."),
+                            N700,
+                        ));
+                    }
+                    if let Some((is_err, text)) = &d.note {
+                        let color = if *is_err { Color32::from_rgb(0xa8, 0x32, 0x2d) } else { N700 };
+                        ui.label(theme::small(text.clone(), color));
+                    }
+                });
+            });
+        }
+        if let Some((id, args)) = run {
+            self.run_spell(ui.ctx(), id, args);
         }
     }
 
